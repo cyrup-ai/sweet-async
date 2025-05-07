@@ -1,0 +1,66 @@
+# Async Task Metrics Reference
+
+This document describes the metrics available in the Async Task system.
+
+## Overview
+
+The Async Task system provides comprehensive observability through standardized metrics
+following OpenTelemetry semantic conventions.
+
+## Metric Categories
+
+{% for group_key, group in schema.groups.items() %}
+### {{ group_key|replace('_', ' ')|title }} Metrics
+
+All metrics in this category use the prefix `{{ group.prefix }}`.
+
+#### Attributes
+
+The following attributes are used across {{ group_key|replace('_', ' ') }} metrics:
+
+| Attribute | Type | Description | Examples |
+|-----------|------|-------------|----------|
+{% for attr_key, attr in group.attributes.items() %}
+| `{{ attr_key }}` | {{ attr.type }} | {{ attr.description }} | {% if attr.examples %}{{ attr.examples|join(", ") }}{% endif %} |
+{% endfor %}
+
+#### Metrics
+
+| Metric | Type | Unit | Description | Attributes |
+|--------|------|------|-------------|------------|
+{% for metric_key, metric in group.metrics.items() %}
+| `{{ metric_key }}` | {{ metric.type }} | {{ metric.unit }} | {{ metric.description }} | {{ metric.attributes|join(", ") }} |
+{% endfor %}
+
+{% endfor %}
+
+## Usage Examples
+
+### Recording Task Duration
+
+```rust
+let metrics = TaskMetrics::new(meter);
+
+// Record task duration
+metrics.record_task_duration(
+    1.5, // seconds
+    &[
+        KeyValue::new("task.id", "task_123"),
+        KeyValue::new("task.name", "data_processing"),
+        KeyValue::new("task.priority", "high")
+    ]
+);
+```
+
+### Monitoring Memory Usage
+
+```rust
+// Record memory usage
+metrics.record_task_memory_usage(
+    1024 * 1024, // bytes
+    &[
+        KeyValue::new("task.id", "task_123"),
+        KeyValue::new("task.name", "data_processing")
+    ]
+);
+```

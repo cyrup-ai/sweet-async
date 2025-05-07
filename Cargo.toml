@@ -1,0 +1,34 @@
+[workspace]
+name = "sweet_async_workspace"
+version = "0.1.0"
+edition = "2024"
+members = ["crates/api", "crates/stdrust-task", "crates/tokio-task"]
+
+[workspace.metadata]
+authors = ["David Maple <david@cyrup.ai>"]
+description = "Async sugar to avoid async_trait and async fn, with a focus on ease of use and ergonomics"
+license = "MIT"
+repository = "https://github.com/cyrup-ai/async_task"
+
+[workspace.dependencies]
+tokio = { version = "1.44.2" }
+tokio-stream = { version = "0.1.17" }
+futures-core = { version = "0.3.31" }
+futures-util = { version = "0.3.31" }
+lazy_static = { version = "1.5.0" }
+thiserror = { version = "2.0.12", features = ["std"] }
+clap = { version = "4.5.37", features = ["derive", "env"] }
+ratatui = { version = "0.29.0" }
+crossterm = { version = "0.29.0" }
+tracing = { version = "0.1.41" }
+futures = { version = "0.3.31" }
+async_task_api = { path = "crates/api" }
+async_task_tui = { path = "crates/tui" }
+tokio-test = { version = "0.4.3" }
+cargo-nextest = { version = "0.9.8" }
+
+[workspace.features]
+tokio = []
+stdrust = []
+default = ["tokio"]
+

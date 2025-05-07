@@ -1,0 +1,27 @@
+[package]
+name = "stdrust-task"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async_task_api = { workspace = true, path = "../api" }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+lazy_static = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+clap = { workspace = true, features = ["derive"] }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+
+#[cfg(feature = "stdrust")]
+[lib]
+name = "async_task"
+path = "src/lib.rs"
+
+#[cfg(feature = "stdrust")]
+[[bin]]
+name = "async_task"
+path = "src/main.rs"

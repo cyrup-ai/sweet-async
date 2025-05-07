@@ -1,0 +1,58 @@
+# OpenTelemetry Semantic Conventions for async_task
+groups:
+  async_task:
+    prefix: task
+    stability: stable
+    attributes:
+      task.id:
+        type: string
+        description: Unique identifier for the task
+        examples: ["task_12345", "backup_task_1"]
+      task.name:
+        type: string
+        description: Human-readable name of the task
+        examples: ["data_processing", "user_backup"]
+      task.priority:
+        type: string
+        description: Priority level of the task
+        examples: ["high", "low", "critical"]
+      task.status:
+        type: string
+        description: Current status of the task
+        examples: ["pending", "running", "completed", "failed"]
+    metrics:
+      task.duration:
+        type: histogram
+        unit: s
+        description: The duration of task execution
+        attributes: [task.id, task.name, task.priority]
+      task.memory.usage:
+        type: gauge
+        unit: By
+        description: Current memory usage of the task
+        attributes: [task.id, task.name]
+      task.cpu.usage:
+        type: gauge
+        unit: "1"
+        description: CPU utilization of the task (0.0-1.0 per core)
+        attributes: [task.id, task.name]
+      task.scheduled_count:
+        type: counter
+        unit: "{tasks}"
+        description: Number of tasks scheduled for execution
+        attributes: [task.priority]
+      task.completed_count:
+        type: counter
+        unit: "{tasks}"
+        description: Number of tasks that completed successfully
+        attributes: [task.priority]
+      task.cancelled_count:
+        type: counter
+        unit: "{tasks}"
+        description: Number of tasks that were cancelled
+        attributes: [task.priority]
+      task.failed_count:
+        type: counter
+        unit: "{tasks}"
+        description: Number of tasks that failed
+        attributes: [task.priority]

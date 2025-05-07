@@ -1,0 +1,68 @@
+global:
+  jq_filters:
+    # Convert OTel metric type to Rust type
+    metric_type_to_rust: |
+      if . == "histogram" then
+        "Histogram<f64>"
+      elif . == "counter" then
+        "Counter<u64>"
+      elif . == "gauge" then
+        "Gauge<f64>"
+      elif . == "up_down_counter" then
+        "Counter<i64>"
+      else
+        "Counter<u64>"
+      end
+    
+    # Convert OTel metric type to meter method
+    metric_method: |
+      if . == "histogram" then
+        "f64_histogram"
+      elif . == "counter" then
+        "u64_counter" 
+      elif . == "gauge" then
+        "f64_gauge"
+      elif . == "up_down_counter" then
+        "i64_up_down_counter"
+      else
+        "u64_counter"
+      end
+    
+    # Convert OTel metric type to Rust value type
+    value_type: |
+      if . == "histogram" then
+        "f64"
+      elif . == "counter" then
+        "u64"
+      elif . == "gauge" then
+        "f64"
+      elif . == "up_down_counter" then
+        "i64" 
+      else
+        "u64"
+      end
+    
+    # Get appropriate method for recording metric values
+    record_method: |
+      if . == "histogram" then
+        "record"
+      elif . == "counter" or . == "up_down_counter" then
+        "add"
+      elif . == "gauge" then
+        "record"
+      else
+        "add"
+      end
+      
+  # Template rendering settings
+  template_sets:
+    - name: task_metrics
+      templates:
+        - source: metrics/task_metrics.j2
+          output: "{{ output_dir }}/task_metrics.rs"
+      jq_filter: |
+        . | walk(
+          if type == "object" and .type == "metric" then
+            .attributes = (.attributes | sort)
+          else . end
+        )

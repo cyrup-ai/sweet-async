@@ -1,0 +1,43 @@
+[package]
+name = "async_task_api"
+version = "0.1.0"
+edition = "2024"
+authors = ["David Maple <david@cyrup.ai>"]
+description = "Async sugar to avoid async_trait and async fn, with a focus on ease of use and ergonomics"
+license = "MIT"
+repository = "https://github.com/cyrup-ai/async_task"
+workspace = "../../"
+documentation = "https://docs.rs/async_task_api"
+readme = "README.md"
+keywords = ["async", "task", "future", "stream", "concurrency"]
+categories = ["asynchronous", "concurrency"]
+
+[package.metadata.docs.rs]
+# Enable all features when building documentation
+all-features = true
+# Use Rust nightly for better documentation features
+rustdoc-args = ["--cfg", "docsrs"]
+# Document private items as well
+rustc-args = ["--document-private-items"]
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+lazy_static = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+clap = { workspace = true, features = ["derive"] }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+cargo-nextest = { workspace = true }
+futures = { workspace = true }
+
+[lib]
+name = "async_task_api"
+path = "src/lib.rs"
