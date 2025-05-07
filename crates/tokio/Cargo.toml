@@ -1,0 +1,20 @@
+[package]
+name = "sweet_async_tokio"
+version = "0.1.0"
+edition = "2024"
+workspace = "../../"
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream = { workspace = true }
+sweet_async_api = { workspace = true, path = "../api" }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+lazy_static = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+[lib]
+name = "sweet_async_tokio"
+path = "src/lib.rs"

@@ -1,13 +1,13 @@
 [package]
-name = "async_task_api"
+name = "sweet_async_api"
 version = "0.1.0"
 edition = "2024"
 authors = ["David Maple <david@cyrup.ai>"]
-description = "Async sugar to avoid async_trait and async fn, with a focus on ease of use and ergonomics"
+description = "Async sugar to simplify async code, primarily for large language models. Key focus on ease of use and ergonomics"
 license = "MIT"
-repository = "https://github.com/cyrup-ai/async_task"
+repository = "https://github.com/cyrup-ai/sweet_async.git"
 workspace = "../../"
-documentation = "https://docs.rs/async_task_api"
+documentation = "https://docs.rs/sweet_async"
 readme = "README.md"
 keywords = ["async", "task", "future", "stream", "concurrency"]
 categories = ["asynchronous", "concurrency"]
@@ -21,15 +21,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 rustc-args = ["--document-private-items"]
 
 [dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
-tokio-stream = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 lazy_static = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 clap = { workspace = true, features = ["derive"] }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 
