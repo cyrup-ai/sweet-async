@@ -189,7 +189,7 @@ pub trait CancellationResult {
 ///     }
 /// }
 /// ```
-pub trait CancellableTask<Id: Debug + Send + Sync + 'static, T: Send + 'static>: MetricsEnabledTask<Id, T> {
+pub trait CancellableTask<T: Send + 'static>: MetricsEnabledTask<T> {
     /// Cancel the task with the given level of severity
     ///
     /// Allows specifying exactly how aggressively the task should

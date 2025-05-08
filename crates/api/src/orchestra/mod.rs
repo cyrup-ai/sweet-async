@@ -1,9 +1,13 @@
+mod orchestrator;
+mod runtime;
+
+pub use orchestrator::*;
+pub use runtime::*;
+
 use std::fmt::Debug;
-use std::future::Future;
-use std::time::Duration;
 
 use crate::api::task::{
-    AsyncTask, AsyncTaskError, TaskHandle, TaskId, TaskPriority, AsyncResult
+    AsyncTask, AsyncTaskError, TaskId, TaskPriority
 };
 use crate::api::Runtime;
 use crate::api::TaskOrchestrator;
@@ -21,17 +25,17 @@ use crate::api::TaskOrchestrator;
 /// 
 /// By implementing AsyncTask, the Orchestra itself can be spawned as a task in another runtime,
 /// creating a powerful composable pattern for nested task management.
-pub trait Orchestra<Id: Debug + Send + Sync + 'static, T: Send + 'static>: 
-    Runtime<Id, T> + 
-    TaskOrchestrator<Id, T> +
-    AsyncTask<Id, T>
+pub trait Orchestra<T: Send + 'static, Task: AsyncTask<T, I>, I: TaskId>: 
+    Runtime<T, I> + 
+    TaskOrchestrator<T, Task, I> +
+    AsyncTask<T, I>
 {
     /// Initialize a new task execution context
     ///
     /// Creates a fresh execution context with the given configuration options.
     /// The context tracks all tasks spawned within it and provides isolation.
     ///
-    fn create_context(&self, name: &str) -> impl Orchestra<Id, T> + 'static;
+    fn create_context(&self, name: &str) -> impl Orchestra<T, Task, I> + 'static;
     
     /// Get the current task execution statistics
     ///
@@ -78,4 +82,10 @@ pub struct ExecutionStats {
     pub max_execution_time_ms: u64,
     /// Minimum execution time observed
     pub min_execution_time_ms: u64,
+}
+
+/// Initial builder for setting the orchestrator before configuring the task
+pub trait OrchestratorBuilder<T: Send + 'static, Task: crate::api::task::AsyncTask<T, I>, I: crate::api::task::TaskId> {
+    type Next: AsyncTaskBuilder;
+    fn with_orchestrator<O: crate::api::TaskOrchestrator<T, Task, I>>(self, orchestrator: &O) -> Self::Next;
 }

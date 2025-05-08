@@ -1,9 +1,8 @@
-use std::fmt::Debug;
 use std::future::Future;
 use std::time::Duration;
 
 use crate::api::task::{
-    AsyncTask, AsyncTaskError, AsyncTaskHandle, TaskId, TaskPriority
+    AsyncTask, AsyncTaskError, TaskPriority
 };
 
 /// Task runtime for managing async execution
@@ -11,16 +10,15 @@ use crate::api::task::{
 /// The Runtime trait provides an abstraction over different async runtimes
 /// (such as Tokio or the standard library) to enable consistent task management.
 ///
-pub trait Runtime<Id: Debug + Send + Sync + 'static, T: Send + 'static> {
+pub trait Runtime<T: Send + 'static, I: crate::api::task::TaskId> {
     /// Spawn a task with a specific priority
     ///
     /// Schedules a task for execution with an optional priority level. Returns a
     /// handle that can be used to await the result or cancel the task.
     ///
-    fn spawn<F>(&self, task: impl AsyncTask<Id, T> + 'static, priority: TaskPriority) -> AsyncTaskHandle<Id, T>
+    fn spawn<F>(&self, task: impl crate::api::task::AsyncTask<T, I> + 'static, priority: TaskPriority)
     where
-        F: Future<Output = Result<T, AsyncTaskError>> + Send + 'static,
-        T: Send + 'static;
+        F: Future<Output = Result<T, AsyncTaskError>> + Send + 'static;
 
     /// Block and wait for a task to complete
     ///
@@ -56,10 +54,5 @@ pub trait Runtime<Id: Debug + Send + Sync + 'static, T: Send + 'static> {
     ///
     fn is_running(&self) -> bool;
     
-    /// Get handles to all currently active tasks
-    ///
-    /// Returns a vector of task handles for all tasks currently being managed
-    /// by this runtime.
-    ///
-    fn active_tasks(&self) -> Vec<AsyncTaskHandle<Id, T>>;
+    // fn active_tasks(&self) -> Vec<AsyncTaskHandle<T>>;
 }

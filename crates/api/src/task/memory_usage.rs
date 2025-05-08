@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 /// Memory metrics for task monitoring following OpenTelemetry conventions
 pub trait MemoryUsage: Send + Sync + 'static {
     /// Current memory allocated by this task in bytes

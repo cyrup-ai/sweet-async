@@ -2,48 +2,36 @@
 name = "sweet_async_workspace"
 version = "0.1.0"
 edition = "2024"
-members = ["crates/api", "crates/stdrust-task", "crates/tokio-task"]
-
+members = ["crates/api", "crates/tokio", "crates/sweet_async"]
+resolver = "3"
 [workspace.metadata]
 authors = ["David Maple <david@cyrup.ai>"]
 description = "Async sugar to avoid async_trait and async fn, with a focus on ease of use and ergonomics"
 license = "MIT"
-repository = "https://github.com/cyrup-ai/async_task"
+repository = "https://github.com/cyrup-ai/sweet_async"
 
 [workspace.dependencies]
-tokio = { version = "1.44.2" }
+tokio = { version = "1.45.0" }
 tokio-stream = { version = "0.1.17" }
 futures-core = { version = "0.3.31" }
 futures-util = { version = "0.3.31" }
 lazy_static = { version = "1.5.0" }
 thiserror = { version = "2.0.12", features = ["std"] }
-clap = { version = "4.5.37", features = ["derive", "env"] }
-ratatui = { version = "0.30.0-alpha.2" }
-crossterm = { version = "0.29.0" }
 tracing = { version = "0.1.41" }
 futures = { version = "0.3.31" }
-tokio-test = { version = "0.4.3" }
-cargo-nextest = { version = "0.9.8" }
+tokio-test = { version = "0.4.4" }
+cargo-nextest = { version = "0.9.95" }
+uuid = "1.16.0"
+chrono = "0.4.41"
+num_cpus = "1.16.0"
 
+sweet_async = { path = "crates/sweet_async" }
 sweet_async_api = { path = "crates/api" }
 sweet_async_tokio = { path = "crates/tokio" }
-
-[package]
-name = "sweet_async"
-version = "0.1.0"
-edition = "2024"
-
-[package.metadata.docs.rs]
-# Enable all features when building documentation
-all-features = true
-# Use Rust nightly for better documentation features
-rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--output-format", "markdown"]
+# sweet_async_async_std = { path = "crates/async-std" } # Uncomment when async-std variant is added
 
 [workspace.features]
 tokio = []
+std = [] # For future async-std support
+# Only one runtime should be enabled at a time. Default is tokio.
 default = ["tokio"]
-
-#cfg[feature = "tokio"]
-[lib]
-name = "sweet_async"
-path = "crates/tokio/src/lib.rs"

@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 workspace = "../../"
 
+[package.metadata.docs.rs]
+# Enable all features when building documentation
+all-features = true
+# Use Rust nightly for better documentation features
+rustdoc-args = ["--cfg", "docsrs"]
+# Document private items as well
+rustc-args = ["--document-private-items"]
+
 [dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-stream = { workspace = true }
@@ -14,6 +22,10 @@ lazy_static = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 futures = { workspace = true }
+
+[dev-dependencies]
+cargo-nextest = { workspace = true }
+tokio-test = { workspace = true }
 
 [lib]
 name = "sweet_async_tokio"

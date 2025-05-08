@@ -1,10 +1,8 @@
-use std::fmt::Debug;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use crate::api::Runtime;
 use crate::api::task::{
-    CancellableTask, MetricsEnabledTask, PrioritizedTask, TaskId
+    CancellableTask, MetricsEnabledTask, PrioritizedTask
 };
 
 /// Task that has execution context information
@@ -12,25 +10,26 @@ use crate::api::task::{
 /// The ContextualizedTask trait provides information about the task's
 /// execution context, including parent-child relationships and runtime environment.
 /// This enables hierarchical task management and coordinated execution.
-pub trait ContextualizedTask<Id: Debug + Send + Sync + 'static, T: Send + 'static>:
-    PrioritizedTask<Id, T> + MetricsEnabledTask<Id, T> + CancellableTask<Id, T>
+pub trait ContextualizedTask<T: Send + 'static, I: crate::api::task::TaskId>:
+    PrioritizedTask<T> + MetricsEnabledTask<T> + CancellableTask<T>
 {
+    type RuntimeType: Runtime<T, I>;
     /// Get a list of all child tasks spawned by this task
     ///
     /// Returns the IDs of all tasks that were spawned as children of this task.
     /// Child tasks are automatically canceled if the parent task is canceled.
-    fn child_tasks(&self) -> Vec<Id>;
+    fn child_tasks(&self) -> Vec<T>;
 
     /// Get this task's parent, if it has one
     ///
     /// Returns the ID of the parent task if this task was spawned as a child task.
     /// If this is a root task, returns None.
-    fn parent(&self) -> Option<Id>;
+    fn parent(&self) -> Option<T>;
 
     /// Get the runtime this task is running in
     ///
     /// Returns a reference to the runtime that is executing this task.
-    fn runtime(&self) -> &dyn Runtime<Id, T>;
+    fn runtime(&self) -> &Self::RuntimeType;
 
     /// Get the current working directory for task execution
     ///

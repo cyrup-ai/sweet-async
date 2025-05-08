@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use crate::api::task::{AsyncTaskError, MetricsEnabledTask};
 
 /// Trait for tasks that support error tracing
@@ -78,28 +76,20 @@ use crate::api::task::{AsyncTaskError, MetricsEnabledTask};
 ///     }
 /// }
 /// ```
-pub trait TracingTask<Id: Debug + Send + Sync + 'static, T: Send + 'static>: MetricsEnabledTask<Id, T> {
+pub trait TracingTask<T: Send + 'static>: MetricsEnabledTask<T> {
     /// Handle an error that occurred during task execution
     ///
     /// This method is called when an error occurs during task execution.
     /// It allows for custom error handling logic to be applied.
     fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError>;
-
-    /// Determine if an error should be retried
-    ///
-    /// This method checks if a particular error is retriable based on
-    /// its type and context.
-    fn should_retry(&self, error: &AsyncTaskError) -> bool;
-    
-    /// Get the maximum number of retry attempts for this task
-    ///
-    /// Returns the configured maximum number of times this task
-    /// should be retried before giving up.
-    fn max_retry_attempts(&self) -> u8;
     
     /// Record an error for later analysis
     ///
     /// This method logs the error with appropriate context for
     /// later debugging and monitoring.
     fn record_error(&self, error: &AsyncTaskError);
+
+    /// Check if tracing is enabled for this task
+    fn is_tracing_enabled(&self) -> bool;
+    
 }

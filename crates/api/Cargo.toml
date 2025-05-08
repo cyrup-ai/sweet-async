@@ -25,12 +25,13 @@ futures-core = { workspace = true }
 futures-util = { workspace = true }
 lazy_static = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
-clap = { workspace = true, features = ["derive"] }
 tracing = { workspace = true }
 futures = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+num_cpus = { workspace = true }
 
 [dev-dependencies]
-tokio-test = { workspace = true }
 cargo-nextest = { workspace = true }
 futures = { workspace = true }
 

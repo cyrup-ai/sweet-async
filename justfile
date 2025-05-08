@@ -3,7 +3,7 @@ default:
     @just --list
 
 doc:
-    cargo rustdoc -Z unstable-options --output-format json
+    cd crates/sweet_async && cargo rustdoc -Z unstable-options --output-format json && cd ../..
 
 build:
     cargo fmt --all --message-format short --quiet

@@ -170,7 +170,7 @@ pub trait RankableByPriority: Copy + Eq + Ord + Send + Sync + 'static {
 ///     }
 /// }
 /// ```
-pub trait PrioritizedTask<Id: Debug + Send + Sync + 'static, T: Send + 'static>: MetricsEnabledTask<Id, T> {
+pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {
     /// Get the priority of this task
     fn priority(&self) -> &impl RankableByPriority;
 }

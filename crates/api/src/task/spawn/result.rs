@@ -1,11 +1,5 @@
-use std::fmt::Debug;
-use std::future::Future;
-use std::pin::Pin;
-use std::result::Result;
-use std::task::{Context, Poll};
-
 use crate::api::task::AsyncTaskError;
-use crate::api::task::spawn::SpawningTask;
+use std::future::Future;
 
 /// A specialized AsyncTask that contains a result value
 ///
@@ -13,9 +7,7 @@ use crate::api::task::spawn::SpawningTask;
 /// standard Result functionality. This allows continued task management
 /// even after the computation has completed while also providing access
 /// to the computation result.
-pub trait TaskResult<Id: Debug + Send + Sync + 'static, T: Send + 'static>: 
-    AsyncTask<Id, T> + Send + 'static
-{
+pub trait TaskResult<T>: Send + 'static {
     /// Get the result of this task computation
     fn result(&self) -> Result<&T, &AsyncTaskError>;
     
@@ -40,30 +32,34 @@ pub trait TaskResult<Id: Debug + Send + Sync + 'static, T: Send + 'static>:
 /// AsyncResult is a specialized AsyncTask that represents the result
 /// of awaiting a SpawningTask. It combines task management capabilities
 /// with result handling.
-pub trait AsyncResult<Id: Debug + Send + Sync + 'static, T: Send + 'static>: 
-    TaskResult<Id, T> + Send + 'static
-{
+pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {
+    type AndThenFuture<U>: Future<Output = Self::AndThenResult<U>> + Send + 'static;
+    type AndThenResult<U>: TaskResult<U>;
+    type OrElseFuture: Future<Output = Self> + Send + 'static;
+    type MapResult<U>: AsyncResult<U>;
+    type MapErrResult: AsyncResult<T>;
+
     /// Chain with another operation that returns a TaskResult
-    fn and_then<U, F, Fut>(self, f: F) -> impl AsyncResult<Id, U> + Send + 'static
+    fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>
     where
         F: FnOnce(T) -> Fut + Send + 'static,
-        Fut: Future<Output = impl TaskResult<Id, U>> + Send + 'static,
+        Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,
         U: Send + 'static;
     
     /// Chain with a function that handles errors
-    fn or_else<F, Fut>(self, f: F) -> impl AsyncResult<Id, T> + Send + 'static
+    fn or_else<F, Fut>(self, f: F) -> Self::OrElseFuture
     where
         F: FnOnce(AsyncTaskError) -> Fut + Send + 'static,
-        Fut: Future<Output = impl TaskResult<Id, T>> + Send + 'static;
+        Fut: Future<Output = Self> + Send + 'static;
     
     /// Map the success value to another type
-    fn map<U, F>(self, f: F) -> impl AsyncResult<Id, U> + Send + 'static
+    fn map<U, F>(self, f: F) -> Self::MapResult<U>
     where
         F: FnOnce(T) -> U + Send + 'static,
         U: Send + 'static;
     
     /// Map the error value to another error
-    fn map_err<F>(self, f: F) -> impl AsyncResult<Id, T> + Send + 'static
+    fn map_err<F>(self, f: F) -> Self::MapErrResult
     where
         F: FnOnce(AsyncTaskError) -> AsyncTaskError + Send + 'static;
     
