@@ -1,25 +1,18 @@
-use crate::api::task::spawn::result::{AsyncResult, TaskResult};
-use crate::api::task::ContextualizedTask;
-use crate::api::task::builder::OrchestratorBuilder;
+use crate::task::ContextualizedTask;
+use crate::orchestra::OrchestratorBuilder;
 
-use std::fmt::Debug;
-use std::future::Future;
-use std::sync::Arc;
-use std::time::Duration;
-use futures::Stream;
-use std::pin::Pin;
-use uuid::Uuid;
 
-use crate::api::task::{
-    AsyncTaskError, CancellableTask, PrioritizedTask, 
-    RecoverableTask, TaskStatus, TracingTask, TimedTask, StatusEnabledTask, MetricsEnabledTask
+
+use crate::task::{
+    CancellableTask, PrioritizedTask, 
+    RecoverableTask, TracingTask, TimedTask, StatusEnabledTask, MetricsEnabledTask
 };
 
 /// Core trait for all asynchronous tasks
 ///
 /// This trait provides the foundation for all specialized tasks,
 /// ensuring they maintain identity, priority, and consistent execution.
-pub trait AsyncTask<T: Send + 'static, I: crate::api::task::TaskId>:
+pub trait AsyncTask<T: Send + 'static, I: crate::task::TaskId>:
     PrioritizedTask<T> + 
     CancellableTask<T> +
     TracingTask<T> + 

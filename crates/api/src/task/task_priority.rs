@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::api::task::MetricsEnabledTask;
+use crate::task::MetricsEnabledTask;
 
 /// Trait defining the behavior of a task priority system
 ///

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::future::Future;
 
-use crate::api::task::MetricsEnabledTask;
+use crate::task::MetricsEnabledTask;
 
 /// Cancellation severity levels for escalation
 ///

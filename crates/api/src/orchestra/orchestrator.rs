@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use crate::api::task::{
+use crate::task::{
     AsyncTaskError, TaskId, TaskStatus, AsyncTask
 };
 

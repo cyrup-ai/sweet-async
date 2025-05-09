@@ -1,4 +1,4 @@
-use crate::api::task::{AsyncTaskError, MetricsEnabledTask};
+use crate::task::{AsyncTaskError, MetricsEnabledTask};
 
 
 pub trait RecoverableTask<T: Send + 'static>: MetricsEnabledTask<T> {

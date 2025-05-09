@@ -36,5 +36,5 @@ cargo-nextest = { workspace = true }
 futures = { workspace = true }
 
 [lib]
-name = "async_task_api"
+name = "sweet_async_api"
 path = "src/lib.rs"

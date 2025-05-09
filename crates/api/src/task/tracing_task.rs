@@ -1,4 +1,4 @@
-use crate::api::task::{AsyncTaskError, MetricsEnabledTask};
+use crate::task::{AsyncTaskError, MetricsEnabledTask};
 
 /// Trait for tasks that support error tracing
 ///

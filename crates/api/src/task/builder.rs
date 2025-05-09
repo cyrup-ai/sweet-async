@@ -2,7 +2,7 @@ use std::future::Future;
 use std::time::Duration;
 use futures::Stream;
 use uuid::Uuid;
-use crate::api::task::emit::ReceiverEvent;
+use crate::task::emit::ReceiverEvent;
 
 /// Builder for constructing specialized task instances with fluent API
 ///
@@ -28,7 +28,7 @@ pub trait AsyncTaskBuilder: Sized {
     fn new() -> Self;
 
     /// Set the task's execution priority
-    fn with_priority(self, priority: crate::api::task::TaskPriority) -> Self;
+    fn with_priority(self, priority: crate::task::TaskPriority) -> Self;
     
     /// Set a descriptive name for the task
     fn with_name(self, name: impl Into<String>) -> Self;
@@ -97,13 +97,13 @@ pub trait SenderBuilder<T, U>: Sized {
         C: Future<Output = ()> + Send + 'static,
         Coll: Default + Send + 'static;
 
-    type EmittingTask: crate::api::task::emit::EmittingTask<T, U>;
+    type EmittingTask: crate::task::emit::EmittingTask<T, U>;
     fn execute(self) -> Self::EmittingTask;
 }
 
 /// Receiver phase of the builder pattern for queue-based tasks
 pub trait ReceiverBuilder<T, U>: Sized {
-    type Task: crate::api::task::emit::EmittingTask<T, U>;
+    type Task: crate::task::emit::EmittingTask<T, U>;
     fn start_queue(self) -> Self::Task;
     // Add more methods as needed for results handler, error strategy, etc.
 }
@@ -167,6 +167,6 @@ pub enum ErrorStrategy {
     /// Retry failed operations with the specified attempts
     Retry(u8),
     /// Custom error handling logic
-    Custom(fn(crate::api::task::AsyncTaskError) -> bool),
+    Custom(fn(crate::task::AsyncTaskError) -> bool),
 }
 

@@ -1,4 +1,4 @@
-use crate::api::task::{CpuUsage, MemoryUsage, IoUsage};
+use crate::task::{CpuUsage, MemoryUsage, IoUsage};
 
 pub trait MetricsEnabledTask<T: Send + 'static> {
     type Cpu: CpuUsage;

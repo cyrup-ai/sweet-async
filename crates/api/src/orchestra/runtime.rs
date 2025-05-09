@@ -1,8 +1,10 @@
 use std::future::Future;
 use std::time::Duration;
 
-use crate::api::task::{
-    AsyncTask, AsyncTaskError, TaskPriority
+#[allow(unused_imports)]
+use crate::task::builder::AsyncTaskBuilder;
+use crate::task::{
+    AsyncTaskError, TaskPriority
 };
 
 /// Task runtime for managing async execution
@@ -10,13 +12,13 @@ use crate::api::task::{
 /// The Runtime trait provides an abstraction over different async runtimes
 /// (such as Tokio or the standard library) to enable consistent task management.
 ///
-pub trait Runtime<T: Send + 'static, I: crate::api::task::TaskId> {
+pub trait Runtime<T: Send + 'static, I: crate::task::TaskId> {
     /// Spawn a task with a specific priority
     ///
     /// Schedules a task for execution with an optional priority level. Returns a
     /// handle that can be used to await the result or cancel the task.
     ///
-    fn spawn<F>(&self, task: impl crate::api::task::AsyncTask<T, I> + 'static, priority: TaskPriority)
+    fn spawn<F>(&self, task: impl crate::task::AsyncTask<T, I> + 'static, priority: TaskPriority)
     where
         F: Future<Output = Result<T, AsyncTaskError>> + Send + 'static;
 

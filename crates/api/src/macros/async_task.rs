@@ -2,21 +2,21 @@
 macro_rules! async_task {
     // Direct block syntax
     ({ $($body:tt)* }) => {{
-        $crate::AsyncTaskBuilder::builder().spawn(|| {
+        $crate::task::AsyncTaskBuilder::builder().spawn(|| {
             $($body)*
         })
     }};
     
     // Traditional closure syntax with no args
     (|| { $($body:tt)* }) => {{
-        $crate::AsyncTaskBuilder::builder().spawn(|| {
+        $crate::task::AsyncTaskBuilder::builder().spawn(|| {
             $($body)*
         })
     }};
     
     // Traditional async closure syntax
     (|| async { $($body:tt)* }) => {{
-        $crate::AsyncTaskBuilder::builder().spawn(|| async {
+        $crate::task::AsyncTaskBuilder::builder().spawn(|| async {
             $($body)*
         })
     }};

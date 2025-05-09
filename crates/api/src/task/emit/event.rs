@@ -16,6 +16,7 @@ pub enum StreamingEventType<T> {
 }
 
 /// Base trait for all streaming events in the system
+#[allow(dead_code)]
 pub trait StreamingEvent<T>: Send + 'static {
     /// When the event was created
     fn created_timestamp(&self) -> &DateTime<Utc>;
@@ -43,6 +44,7 @@ pub trait StreamingEvent<T>: Send + 'static {
 }
 
 /// Collects and manages event results
+#[allow(dead_code)]
 pub trait Collector<T, C>: Send + 'static {
     /// Collect a single item
     fn collect_item(&mut self, item: C);
@@ -55,6 +57,7 @@ pub trait Collector<T, C>: Send + 'static {
 }
 
 /// Builder for sender events - uses a fluent API without explicit build steps
+#[allow(dead_code)]
 pub trait SenderEventBuilder<T>: SenderEvent<T> + Send + 'static {
     /// Create a new sender event builder
     fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self;
@@ -70,6 +73,7 @@ pub trait SenderEventBuilder<T>: SenderEvent<T> + Send + 'static {
 }
 
 /// Event that can be sent through the system
+#[allow(dead_code)]
 pub trait SenderEvent<T>: StreamingEvent<T> + Send + 'static {
     type Builder: SenderEventBuilder<T>;
     /// Create a new builder for this event type
@@ -107,6 +111,7 @@ pub trait ReceiverEvent<T, C>: Send + 'static {
 }
 
 /// The final event in a sequence, containing all collected results
+#[allow(dead_code)]
 pub trait FinalEvent<T, C, Item>: ReceiverEvent<T, C> + Send + 'static {
     /// Access all collected events
     fn collected(&self) -> &HashMap<Uuid, Item>;

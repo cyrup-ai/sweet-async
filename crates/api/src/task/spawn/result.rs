@@ -1,4 +1,4 @@
-use crate::api::task::AsyncTaskError;
+use crate::task::AsyncTaskError;
 use std::future::Future;
 
 /// A specialized AsyncTask that contains a result value
@@ -7,6 +7,7 @@ use std::future::Future;
 /// standard Result functionality. This allows continued task management
 /// even after the computation has completed while also providing access
 /// to the computation result.
+#[allow(dead_code)]
 pub trait TaskResult<T>: Send + 'static {
     /// Get the result of this task computation
     fn result(&self) -> Result<&T, &AsyncTaskError>;
@@ -32,6 +33,7 @@ pub trait TaskResult<T>: Send + 'static {
 /// AsyncResult is a specialized AsyncTask that represents the result
 /// of awaiting a SpawningTask. It combines task management capabilities
 /// with result handling.
+#[allow(dead_code)]
 pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {
     type AndThenFuture<U>: Future<Output = Self::AndThenResult<U>> + Send + 'static;
     type AndThenResult<U>: TaskResult<U>;

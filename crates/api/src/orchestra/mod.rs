@@ -1,22 +1,20 @@
-mod orchestrator;
-mod runtime;
-
-pub use orchestrator::*;
-pub use runtime::*;
+pub mod orchestrator;
+pub mod runtime;
 
 use std::fmt::Debug;
 
-use crate::api::task::{
-    AsyncTask, AsyncTaskError, TaskId, TaskPriority
+use crate::task::{
+    TaskId, TaskPriority
 };
-use crate::api::Runtime;
-use crate::api::TaskOrchestrator;
+use crate::orchestra::runtime::Runtime;
+use crate::orchestra::orchestrator::TaskOrchestrator;
+use crate::task::AsyncTask;
+use crate::task::builder::AsyncTaskBuilder;
 
 //
 // Stateful Task Orchestration Runtime and Context
 // ----------------------
 //
-
 /// Orchestra combines runtime capabilities with task orchestration
 ///
 /// The Orchestra trait provides a unified interface for task execution and orchestration,
@@ -85,7 +83,13 @@ pub struct ExecutionStats {
 }
 
 /// Initial builder for setting the orchestrator before configuring the task
-pub trait OrchestratorBuilder<T: Send + 'static, Task: crate::api::task::AsyncTask<T, I>, I: crate::api::task::TaskId> {
+pub trait OrchestratorBuilder<T: Send + 'static, Task: crate::task::AsyncTask<T, I>, I: crate::task::TaskId> {
     type Next: AsyncTaskBuilder;
-    fn with_orchestrator<O: crate::api::TaskOrchestrator<T, Task, I>>(self, orchestrator: &O) -> Self::Next;
+    fn with_orchestrator<O: crate::orchestra::TaskOrchestrator<T, Task, I>>(self, orchestrator: &O) -> Self::Next;
 }
+
+#[allow(unused)]
+pub use orchestrator::*;
+
+#[allow(unused)]
+pub use runtime::*;

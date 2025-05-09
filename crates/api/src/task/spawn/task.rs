@@ -1,7 +1,7 @@
 use std::future::Future;
-use crate::AsyncTask;
-use crate::api::task::spawn::TaskResult;
-use crate::api::task::spawn::AsyncResult;
+use crate::task::AsyncTask;
+use crate::task::spawn::TaskResult;
+use crate::task::spawn::AsyncResult;
 
 /// A specialized AsyncTask that can be awaited
 ///
@@ -13,7 +13,8 @@ use crate::api::task::spawn::AsyncResult;
 /// This enables structured concurrency with parent-child relationships,
 /// chained task execution, cancellation propagation, and resource 
 /// lifecycle management.
-pub trait SpawningTask<T: Send + 'static, I: crate::api::task::TaskId>:
+#[allow(dead_code)]
+pub trait SpawningTask<T: Send + 'static, I: crate::task::TaskId>:
     AsyncTask<T, I> + Send + 'static
 {
     type OutputFuture: Future<Output = Self::TaskResult> + Send + 'static;

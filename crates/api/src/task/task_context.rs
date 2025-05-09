@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::api::Runtime;
-use crate::api::task::{
+use crate::orchestra::runtime::Runtime;
+use crate::task::{
     CancellableTask, MetricsEnabledTask, PrioritizedTask
 };
 
@@ -10,7 +10,7 @@ use crate::api::task::{
 /// The ContextualizedTask trait provides information about the task's
 /// execution context, including parent-child relationships and runtime environment.
 /// This enables hierarchical task management and coordinated execution.
-pub trait ContextualizedTask<T: Send + 'static, I: crate::api::task::TaskId>:
+pub trait ContextualizedTask<T: Send + 'static, I: crate::task::TaskId>:
     PrioritizedTask<T> + MetricsEnabledTask<T> + CancellableTask<T>
 {
     type RuntimeType: Runtime<T, I>;
