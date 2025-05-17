@@ -1,17 +1,16 @@
-
-mod emit;
-mod spawn;
-mod task_id;
-mod timed_task;
-mod task_metrics;
-mod task_status;
-mod task_priority;
+pub mod builder;
 mod cancellable_task;
+mod emit;
+mod recoverable_task;
+pub mod spawn;
 mod task_context;
 mod task_error;
+mod task_id;
+mod task_metrics;
+mod task_priority;
+mod task_status;
+mod timed_task;
 mod tracing_task;
-mod recoverable_task;
-pub mod builder;
 
 // Usage-specific traits
 mod cpu_usage;
@@ -19,10 +18,12 @@ mod io_usage;
 mod memory_usage;
 
 // Top-level task implementation
-mod async_task;
+pub mod async_task;
 
 // Re-exports
 pub use async_task::*;
+// Macro `to` replaces `resolves_to` for ergonomic builder syntax.
+pub use builder::*;
 pub use cancellable_task::*;
 pub use cpu_usage::*;
 pub use io_usage::*;
@@ -36,5 +37,3 @@ pub use task_priority::*;
 pub use task_status::*;
 pub use timed_task::*;
 pub use tracing_task::*;
-pub use builder::*;
-

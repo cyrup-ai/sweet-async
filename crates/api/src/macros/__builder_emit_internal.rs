@@ -5,4 +5,4 @@ macro_rules! __builder_emit_internal {
     ({ $($body:tt)* }) => {{
         { $($body)* }
     }};
-} 
+}

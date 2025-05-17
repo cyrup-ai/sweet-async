@@ -1,6 +1,12 @@
-pub mod async_task;
-pub mod builder;
-pub mod process_stream;
-pub mod __builder_spawn_internal;
 pub mod __builder_emit_internal;
-pub mod register_task; 
+pub mod __builder_spawn_internal;
+pub mod async_task;
+pub mod await_final_event;
+pub mod await_result;
+pub mod builder;
+pub mod emits;
+pub mod fallback_value;
+pub mod process_stream;
+pub mod register_task;
+pub mod resolves_to;
+pub mod spawn_task;

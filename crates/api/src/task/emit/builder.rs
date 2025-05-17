@@ -1,15 +1,32 @@
+use crate::task::builder::{AsyncTaskBuilder, ReceiverStrategy, SenderStrategy};
 use crate::task::emit::EmittingTask;
-use crate::task::emit::{Collector, ReceiverEvent};
-use crate::task::builder::{SenderStrategy, ReceiverStrategy, AsyncTaskBuilder};
+use crate::task::task_id::TaskId;
 
-pub trait EmittingTaskBuilder<T: Send + 'static, U: Send + 'static>: AsyncTaskBuilder {
-    type Task: EmittingTask<T, U>;
-    type SenderFn: FnOnce(&mut dyn Collector<T, U>) + Send + 'static + Clone;
-    type ReceiverFn: FnMut(&dyn ReceiverEvent<T, U>, &dyn Collector<T, U>) + Send + 'static + Clone;
-    #[allow(dead_code)]
-    fn with_sender(self, strategy: SenderStrategy, sender: Self::SenderFn) -> Self::Task;
-    #[allow(dead_code)]
-    fn with_receiver(self, strategy: ReceiverStrategy, receiver: Self::ReceiverFn) -> Self;
-    #[allow(dead_code)]
-    fn execute(self) -> Self::Task;
-} 
+#[allow(dead_code)]
+pub trait EmittingTaskBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+    AsyncTaskBuilder
+{
+    type SenderBuilder: SenderBuilder<T, C, E, I>;
+    /// Sets the sender for the emitting task.
+    fn sender<F>(self, sender: F, strategy: SenderStrategy) -> Self::SenderBuilder
+    where
+        F: crate::task::builder::AsyncWork<T> + Send + 'static;
+}
+
+#[allow(dead_code)]
+pub trait SenderBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+    type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;
+    /// Sets the receiver for the sender builder.
+    fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder
+    where
+        F: crate::task::builder::AsyncWork<C> + Send + 'static;
+}
+
+#[allow(dead_code)]
+pub trait ReceiverBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+    type Task: EmittingTask<T, C, E, I>;
+    fn run(self) -> Self::Task;
+    fn await_result(
+        self,
+    ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send;
+}

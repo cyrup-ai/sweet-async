@@ -10,5 +10,6 @@ default = ["tokio"]
 # std = ["dep:sweet_async_std"] # For future
 
 [dependencies]
+sweet_async_api = { path = "../api" }
 sweet_async_tokio = { path = "../tokio", optional = true }
 tokio = { workspace = true, optional = true }

@@ -1,4 +1,4 @@
-use crate::task::{AsyncTaskError, MetricsEnabledTask};
+use crate::task::AsyncTaskError;
 
 /// Trait for tasks that support error tracing
 ///
@@ -49,7 +49,7 @@ use crate::task::{AsyncTaskError, MetricsEnabledTask};
 ///
 ///     fn should_retry(&self, error: &AsyncTaskError) -> bool {
 ///         // Only retry transient errors, not permanent failures
-///         matches!(error, 
+///         matches!(error,
 ///             AsyncTaskError::Timeout |
 ///             AsyncTaskError::Overloaded |
 ///             AsyncTaskError::TemporaryResourceFailure(_)
@@ -76,13 +76,13 @@ use crate::task::{AsyncTaskError, MetricsEnabledTask};
 ///     }
 /// }
 /// ```
-pub trait TracingTask<T: Send + 'static>: MetricsEnabledTask<T> {
+pub trait TracingTask<T: Send + 'static> {
     /// Handle an error that occurred during task execution
     ///
     /// This method is called when an error occurs during task execution.
     /// It allows for custom error handling logic to be applied.
     fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError>;
-    
+
     /// Record an error for later analysis
     ///
     /// This method logs the error with appropriate context for
@@ -91,5 +91,4 @@ pub trait TracingTask<T: Send + 'static>: MetricsEnabledTask<T> {
 
     /// Check if tracing is enabled for this task
     fn is_tracing_enabled(&self) -> bool;
-    
 }

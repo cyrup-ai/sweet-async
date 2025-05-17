@@ -2,7 +2,15 @@
 name = "sweet_async_tokio"
 version = "0.1.0"
 edition = "2024"
+authors = ["David Maple <david@cyrup.ai>"]
+description = "Tokio implementation for the Sweet Async library"
+license = "MIT"
+repository = "https://github.com/cyrup-ai/sweet_async.git"
 workspace = "../../"
+documentation = "https://docs.rs/sweet_async_tokio"
+readme = "README.md"
+keywords = ["async", "task", "tokio", "future", "concurrency"]
+categories = ["asynchronous", "concurrency"]
 
 [package.metadata.docs.rs]
 # Enable all features when building documentation
@@ -13,20 +21,25 @@ rustdoc-args = ["--cfg", "docsrs"]
 rustc-args = ["--document-private-items"]
 
 [dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
-tokio-stream = { workspace = true }
 sweet_async_api = { workspace = true, path = "../api" }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
+futures = { workspace = true }
 lazy_static = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
-futures = { workspace = true }
+num_cpus = { workspace = true }
 
 [dev-dependencies]
-cargo-nextest = { workspace = true }
 tokio-test = { workspace = true }
+cargo-nextest = { workspace = true }
 
 [lib]
 name = "sweet_async_tokio"
 path = "src/lib.rs"
+
+[[example]]
+name = "tokio_examples"
+path = "examples/tokio_examples.rs"

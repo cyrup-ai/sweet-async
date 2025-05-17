@@ -1,7 +1,4 @@
-use std::fmt::Debug;
 use std::future::Future;
-
-use crate::task::MetricsEnabledTask;
 
 /// Cancellation severity levels for escalation
 ///
@@ -12,7 +9,7 @@ use crate::task::MetricsEnabledTask;
 /// # Cancellation Levels
 ///
 /// ## Graceful
-/// 
+///
 /// The most cooperative level of cancellation. The task is notified to stop, but
 /// is given time to:
 ///
@@ -91,19 +88,19 @@ pub enum CancellationLevel {
 pub trait CancellationResult {
     /// Check if the cancellation was successful
     fn is_success(&self) -> bool;
-    
+
     /// Check if the task timed out
     fn is_timeout(&self) -> bool;
-    
+
     /// Check if the task failed
     fn is_failure(&self) -> bool;
-    
+
     /// Check if the task was cancelled
     fn is_cancelled(&self) -> bool;
-    
+
     /// Check if the task is still running
     fn is_running(&self) -> bool;
-    
+
     /// Get the level at which the task was cancelled
     fn cancellation_level(&self) -> CancellationLevel;
 }
@@ -139,7 +136,7 @@ pub trait CancellationResult {
 ///     Id: TaskId,
 ///     T: Send + 'static,
 /// {
-///     async fn cancel(&self, level: CancellationLevel) -> bool {
+///     async fn cancel(&self, level: CancellationLevel) -> Result<(), OrchestratorError> {
 ///         // Set the cancellation flag atomically
 ///         self.set_cancelled(true);
 ///         
@@ -164,15 +161,15 @@ pub trait CancellationResult {
 ///         true
 ///     }
 ///     
-///     async fn cancel_gracefully(&self) -> bool {
+///     async fn cancel_gracefully(&self) -> Result<(), OrchestratorError> {
 ///         self.cancel(CancellationLevel::Graceful).await
 ///     }
 ///     
-///     async fn cancel_forcefully(&self) -> bool {
+///     async fn cancel_forcefully(&self) -> Result<(), OrchestratorError> {
 ///         self.cancel(CancellationLevel::Kill).await
 ///     }
 ///     
-///     async fn cancel_immediately(&self) -> bool {
+///     async fn cancel_immediately(&self) -> Result<(), OrchestratorError> {
 ///         self.cancel(CancellationLevel::KillHard).await
 ///     }
 ///     
@@ -182,49 +179,54 @@ pub trait CancellationResult {
 ///     
 ///     fn on_cancel<F, Fut>(&self, callback: F)
 ///     where
-///         F: FnOnce() -> Fut + Send + 'static,
+///         F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
 ///         Fut: Future<Output = ()> + Send + 'static
 ///     {
 ///         self.register_cancellation_callback(callback);
 ///     }
 /// }
 /// ```
-pub trait CancellableTask<T: Send + 'static>: MetricsEnabledTask<T> {
+use crate::orchestra::OrchestratorError;
+
+pub trait CancellableTask<T: Send + 'static> {
     /// Cancel the task with the given level of severity
     ///
     /// Allows specifying exactly how aggressively the task should
     /// be terminated.
-    fn cancel(&self, level: CancellationLevel) -> impl Future<Output = bool> + Send;
-    
+    fn cancel(
+        &self,
+        level: CancellationLevel,
+    ) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+
     /// Gracefully cancel the task, allowing it to clean up
     ///
     /// This is the preferred cancellation method when time permits,
     /// as it allows the task to release resources properly.
-    fn cancel_gracefully(&self) -> impl Future<Output = bool> + Send;
-    
+    fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+
     /// Forcefully cancel the task with minimal cleanup
     ///
     /// For when graceful cancellation is taking too long or
     /// when more urgent cancellation is needed.
-    fn cancel_forcefully(&self) -> impl Future<Output = bool> + Send;
-    
+    fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+
     /// Immediately terminate the task with no cleanup
     ///
     /// Only use this in emergency situations where the task
     /// must be stopped immediately regardless of consequences.
-    fn cancel_immediately(&self) -> impl Future<Output = bool> + Send;
-    
+    fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+
     /// Check if the task has been cancelled
     ///
     /// Returns whether a cancellation has been requested for this task.
     fn is_cancelled(&self) -> bool;
-    
+
     /// Register a callback to be executed when the task is cancelled
     ///
     /// Allows registering cleanup or notification code to run when
     /// cancellation occurs.
     fn on_cancel<F, Fut>(&self, callback: F)
     where
-        F: FnOnce() -> Fut + Send + 'static,
+        F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static;
 }

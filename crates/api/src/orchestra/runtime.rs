@@ -1,11 +1,11 @@
+use crate::orchestra::OrchestratorError;
+use crate::task::async_task::AsyncTask;
 use std::future::Future;
 use std::time::Duration;
 
 #[allow(unused_imports)]
 use crate::task::builder::AsyncTaskBuilder;
-use crate::task::{
-    AsyncTaskError, TaskPriority
-};
+use crate::task::{AsyncTaskError, TaskPriority};
 
 /// Task runtime for managing async execution
 ///
@@ -15,12 +15,20 @@ use crate::task::{
 pub trait Runtime<T: Send + 'static, I: crate::task::TaskId> {
     /// Spawn a task with a specific priority
     ///
-    /// Schedules a task for execution with an optional priority level. Returns a
-    /// handle that can be used to await the result or cancel the task.
+    /// Schedules a task for execution with an optional priority level.
+    /// The task must implement SpawningTask to ensure it can be properly executed.
     ///
-    fn spawn<F>(&self, task: impl crate::task::AsyncTask<T, I> + 'static, priority: TaskPriority)
-    where
-        F: Future<Output = Result<T, AsyncTaskError>> + Send + 'static;
+    /// # Returns
+    ///
+    /// Returns the spawned task, which implements AsyncTask and can be awaited,
+    /// cancelled, or tracked for status updates.
+    ///
+    type SpawnedTask: AsyncTask<T, I> + Future<Output = Result<T, AsyncTaskError>>;
+    fn spawn(
+        &self,
+        task: impl crate::task::spawn::SpawningTask<T, I> + 'static,
+        priority: TaskPriority,
+    ) -> Self::SpawnedTask;
 
     /// Block and wait for a task to complete
     ///
@@ -47,7 +55,9 @@ pub trait Runtime<T: Send + 'static, I: crate::task::TaskId> {
     /// - `true` if all tasks completed successfully within the timeout
     /// - `false` if the timeout was reached and some tasks were still running
     ///
-    fn shutdown(&self, timeout: Duration) -> bool;
+    /// Attempts to gracefully shut down the runtime, waiting for active tasks to complete up to the specified timeout.
+    /// Returns Ok(()) if all tasks completed successfully, or Err(OrchestratorError) if the timeout was reached or shutdown failed.
+    fn shutdown(&self, timeout: Duration) -> Result<(), OrchestratorError>;
 
     /// Check if the runtime is still running
     ///
@@ -55,6 +65,6 @@ pub trait Runtime<T: Send + 'static, I: crate::task::TaskId> {
     /// false if it has been shut down or is in the process of shutting down.
     ///
     fn is_running(&self) -> bool;
-    
+
     // fn active_tasks(&self) -> Vec<AsyncTaskHandle<T>>;
 }

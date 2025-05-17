@@ -204,17 +204,17 @@ pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {
 ///
 /// // Critical priority for system health checks
 /// let health_check_task = task_manager.create_task("health_check")
-///     .with_priority(TaskPriority::Critical)
+///     .priority(TaskPriority::Critical)
 ///     .build();
 ///
 /// // Normal priority for standard user requests
 /// let user_request = task_manager.create_task("user_request")
-///     .with_priority(TaskPriority::Normal) // This is the default
+///     .priority(TaskPriority::Normal) // This is the default
 ///     .build();
 ///
 /// // Background priority for cleanup tasks
 /// let cleanup_task = task_manager.create_task("cleanup")
-///     .with_priority(TaskPriority::Background)
+///     .priority(TaskPriority::Background)
 ///     .build();
 ///
 /// // Priority comparison
@@ -225,16 +225,16 @@ pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {
 pub enum TaskPriority {
     /// Highest priority - critical system tasks
     Critical = 0,
-    
+
     /// High priority - important user-facing operations
     High = 1,
-    
+
     /// Default priority for most tasks
     Normal = 2,
-    
+
     /// Lower priority - background operations
     Low = 3,
-    
+
     /// Lowest priority - non-essential maintenance tasks
     Background = 4,
 }

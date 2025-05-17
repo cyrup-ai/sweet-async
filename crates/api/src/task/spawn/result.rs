@@ -1,4 +1,5 @@
-use crate::task::AsyncTaskError;
+use crate::task::builder::AsyncWork;
+use crate::task::task_error::AsyncTaskError;
 use std::future::Future;
 
 /// A specialized AsyncTask that contains a result value
@@ -11,19 +12,21 @@ use std::future::Future;
 pub trait TaskResult<T>: Send + 'static {
     /// Get the result of this task computation
     fn result(&self) -> Result<&T, &AsyncTaskError>;
-    
+
     /// Consume the task and return just the result value
-    fn into_result(self) -> Result<T, AsyncTaskError> where Self: Sized;
-    
+    fn into_result(self) -> Result<T, AsyncTaskError>
+    where
+        Self: Sized;
+
     /// Check if this task's computation succeeded
     fn is_ok(&self) -> bool;
-    
+
     /// Check if this task's computation failed with an error
     fn is_err(&self) -> bool;
-    
+
     /// Get a reference to the success value, if available
     fn as_ref(&self) -> Option<&T>;
-    
+
     /// Get a reference to the error value, if available
     fn as_err(&self) -> Option<&AsyncTaskError>;
 }
@@ -44,31 +47,34 @@ pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {
     /// Chain with another operation that returns a TaskResult
     fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>
     where
-        F: FnOnce(T) -> Fut + Send + 'static,
+        F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,
         U: Send + 'static;
-    
+
     /// Chain with a function that handles errors
     fn or_else<F, Fut>(self, f: F) -> Self::OrElseFuture
     where
-        F: FnOnce(AsyncTaskError) -> Fut + Send + 'static,
+        F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = Self> + Send + 'static;
-    
+
     /// Map the success value to another type
     fn map<U, F>(self, f: F) -> Self::MapResult<U>
     where
-        F: FnOnce(T) -> U + Send + 'static,
+        F: AsyncWork<U> + Send + 'static,
         U: Send + 'static;
-    
+
     /// Map the error value to another error
     fn map_err<F>(self, f: F) -> Self::MapErrResult
     where
-        F: FnOnce(AsyncTaskError) -> AsyncTaskError + Send + 'static;
-    
-    /// Unwrap the result, returning the success value or panicking
-    fn unwrap(self) -> T where Self: Sized;
-    
-    /// Unwrap the error, returning the error value or panicking
-    fn unwrap_err(self) -> AsyncTaskError where Self: Sized;
-}
+        F: AsyncWork<AsyncTaskError> + Send + 'static;
 
+    /// Unwrap the result, returning the success value or panicking
+    fn unwrap(self) -> T
+    where
+        Self: Sized;
+
+    /// Unwrap the error, returning the error value or panicking
+    fn unwrap_err(self) -> AsyncTaskError
+    where
+        Self: Sized;
+}

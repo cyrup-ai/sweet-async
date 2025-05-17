@@ -1,8 +1,41 @@
+use crate::task::emit::ReceiverEvent;
+use futures::Stream;
+use std::fmt::Debug;
 use std::future::Future;
 use std::time::Duration;
-use futures::Stream;
 use uuid::Uuid;
-use crate::task::emit::ReceiverEvent;
+
+/// Represents a range with minimum and maximum values
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MinMax<T>(pub T, pub T)
+where
+    T: PartialOrd + Copy + Debug;
+
+impl<T> MinMax<T>
+where
+    T: PartialOrd + Copy + Debug,
+{
+    /// Create a new range with minimum and maximum values
+    pub fn new(min: T, max: T) -> Self {
+        debug_assert!(
+            min <= max,
+            "MinMax: min ({:?}) must be <= max ({:?})",
+            min,
+            max
+        );
+        Self(min, max)
+    }
+
+    /// Get the minimum value
+    pub fn min(&self) -> T {
+        self.0
+    }
+
+    /// Get the maximum value
+    pub fn max(&self) -> T {
+        self.1
+    }
+}
 
 /// Builder for constructing specialized task instances with fluent API
 ///
@@ -13,103 +46,95 @@ use crate::task::emit::ReceiverEvent;
 /// The builder offers two main execution models:
 ///
 /// 1. **Future-based Execution**:
-///    - `spawn()`: Returns a SpawningTask (AsyncTask + Future)
 ///    - When awaited, produces a TaskResult (AsyncTask + Result)
 ///
 /// 2. **Stream-based Execution**:
-///    - `with_sender()`: Defines how events are produced or sourced
-///    - `with_receiver()`: Specifies how to process each event
-///    - `execute()`: Starts the queue and returns a QueuingTask
+///    - `sender()`: Defines how events are produced or sourced
+///    - `receiver()`: Specifies how to process each event
+///    - `run()`: Starts the task and returns a handle
 ///
 /// These two execution models provide all the functionality needed for most task scenarios.
 pub trait AsyncTaskBuilder: Sized {
+    /// Sets a descriptive name for the task.
+
+    /// Sets a timeout duration for task execution.
+    fn timeout(self, duration: std::time::Duration) -> Self;
+    /// Sets the task's execution priority.
+
+    /// Configure the number of retry attempts for failures
+    fn retry(self, attempts: u8) -> Self;
+    /// Enable or disable detailed execution tracing
+    fn tracing(self, enabled: bool) -> Self;
+
     /// Create a new builder instance (internal method)
     #[doc(hidden)]
     fn new() -> Self;
-
-    /// Set the task's execution priority
-    fn with_priority(self, priority: crate::task::TaskPriority) -> Self;
-    
-    /// Set a descriptive name for the task
-    fn with_name(self, name: impl Into<String>) -> Self;
-    
-    /// Set a timeout duration for task execution
-    fn with_timeout(self, duration: Duration) -> Self;
-    
-    /// Configure the number of retry attempts for failures
-    fn with_retry(self, attempts: u8) -> Self;
-    
-    /// Enable or disable detailed execution tracing
-    fn with_tracing(self, enabled: bool) -> Self;
 }
 
-/// Trait for asynchronous work that produces a result
-///
-/// This trait represents work that can be executed asynchronously and
-/// produces a result of type R. The work is executed by calling `execute()`
-/// which returns a Future that resolves to the result.
 pub trait AsyncWork<R> {
     /// Execute the work and return a Future that resolves to the result
-    fn execute(self) -> impl Future<Output = R> + Send + 'static;
+    fn run(self) -> impl Future<Output = R> + Send + 'static;
 }
 
 // Implementation for async closures
-impl<R, F, Fut> AsyncWork<R> for F 
+impl<R, F, Fut> AsyncWork<R> for F
 where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = R> + Send + 'static,
 {
-    fn execute(self) -> impl Future<Output = R> + Send + 'static {
+    fn run(self) -> impl Future<Output = R> + Send + 'static {
         self()
     }
 }
 
 /// Sender phase of the builder pattern for queue-based tasks
-pub trait SenderBuilder<T, U>: Sized {
-    type Receiver: ReceiverBuilder<T, U>;
-    type StreamProcessorReceiver<C, Coll>: ReceiverBuilder<T, Coll>;
+pub trait SenderBuilder<
+    T: Send + 'static,
+    U: Send + 'static,
+    E: Send + 'static,
+    I: crate::task::task_id::TaskId,
+>: Sized
+{
+    type Receiver: ReceiverBuilder<T, U, E, I>;
+    type StreamProcessorReceiver<C: Send + 'static, Coll: Send + 'static>: ReceiverBuilder<T, Coll, E, I>;
     /// Add a receiver to process task events with a collector
-    ///
-    /// The receiver is responsible for handling events as they're produced.
-    /// The strategy controls how events are consumed (serial, parallel, batched).
-    /// This method transitions the builder to the receiver phase.
-    ///
-    /// # Event-by-event processing (recommended)
-    /// ```
-    /// |event: &ReceiverEvent<User>, collector: &mut Stats| { /* process one event */ }
-    /// ```
-    fn with_receiver(self, strategy: ReceiverStrategy, receiver: fn(&T, &mut (), Uuid) -> U) -> Self::Receiver;
-        
-    /// Add a stream processor to process the entire event stream 
-    ///
-    /// For advanced use cases where you need to process the entire stream at once.
-    /// This provides more control but is more complex to implement correctly.
-    ///
-    /// # Whole-stream processing (advanced)
-    /// ```
-    /// |events: Stream<ReceiverEvent<User>>, collector: &mut Stats| { /* process stream */ }
-    /// ```
-    fn with_stream_processor<C, F, S, Coll>(self, processor: F, strategy: ReceiverStrategy) -> Self::StreamProcessorReceiver<C, Coll>
+    fn receiver(
+        self,
+        strategy: ReceiverStrategy,
+        receiver: fn(&T, &mut (), Uuid) -> U,
+    ) -> Self::Receiver;
+
+    /// Add a stream processor to process the entire event stream
+    fn stream_processor<C: Send + 'static, F, S, Coll: Send + 'static>(
+        self,
+        processor: F,
+        strategy: ReceiverStrategy,
+    ) -> Self::StreamProcessorReceiver<C, Coll>
     where
-        F: FnOnce(S, &mut Coll) -> C + Send + 'static,
+        F: AsyncWork<C> + Send + 'static,
         S: Stream + Send + 'static,
         S::Item: ReceiverEvent<T, C>,
         C: Future<Output = ()> + Send + 'static,
         Coll: Default + Send + 'static;
 
-    type EmittingTask: crate::task::emit::EmittingTask<T, U>;
-    fn execute(self) -> Self::EmittingTask;
+    type EmittingTask: crate::task::emit::EmittingTask<T, U, E, I>;
+    fn run(self) -> Self::EmittingTask;
 }
 
-/// Receiver phase of the builder pattern for queue-based tasks
-pub trait ReceiverBuilder<T, U>: Sized {
-    type Task: crate::task::emit::EmittingTask<T, U>;
+pub trait ReceiverBuilder<
+    T: Send + 'static,
+    U: Send + 'static,
+    E: Send + 'static,
+    I: crate::task::task_id::TaskId,
+>: Sized
+{
+    type Task: crate::task::emit::EmittingTask<T, U, E, I>;
     fn start_queue(self) -> Self::Task;
     // Add more methods as needed for results handler, error strategy, etc.
 }
 
 /// Strategy for processing events in a queue
-/// 
+///
 /// Controls how events are processed. Can be applied to both
 /// senders (how events are sourced) and receivers (how events are handled).
 #[derive(Debug, Clone)]
@@ -120,8 +145,8 @@ pub enum ReceiverStrategy {
     },
     /// Process in parallel
     Parallel {
-        workers: usize,      // default: num_cpus::get()
-        rate_limit: f64,     // default: 0.0 (no rate limit)
+        workers: usize,  // default: num_cpus::get()
+        rate_limit: f64, // default: 0.0 (no rate limit)
     },
     /// Process in batches
     Batched {
@@ -130,10 +155,10 @@ pub enum ReceiverStrategy {
     },
     /// Automatically adjust based on workload
     Adaptive {
-        initial_capacity: usize,      // default: 64
-        max_concurrency: usize,       // default: num_cpus::get()
-        adaptation_window: Duration,  // default: Duration::from_secs(1)
-        use_rayon_for_cpu: bool,      // default: false
+        initial_capacity: usize,     // default: 64
+        max_concurrency: usize,      // default: num_cpus::get()
+        adaptation_window: Duration, // default: Duration::from_secs(1)
+        use_rayon_for_cpu: bool,     // default: false
     },
 }
 
@@ -143,18 +168,18 @@ pub enum SenderStrategy {
         timeout_seconds: u64, // default: 0 (no timeout)
     },
     Parallel {
-        workers: usize,      // default: num_cpus::get()
-        rate_limit: f64,     // default: 0.0 (no rate limit)
+        workers: MinMax<usize>, // default: MinMax(1, num_cpus::get())
+        rate_limit: f64,        // default: 0.0 (no rate limit)
     },
     Batched {
         batch_size: usize,   // default: 64
         max_delay: Duration, // default: Duration::from_millis(100)
     },
     Adaptive {
-        initial_capacity: usize,      // default: 64
-        max_concurrency: usize,       // default: num_cpus::get()
-        adaptation_window: Duration,  // default: Duration::from_secs(1)
-        use_rayon_for_cpu: bool,      // default: false
+        initial_capacity: usize,     // default: 64
+        max_concurrency: usize,      // default: num_cpus::get()
+        adaptation_window: Duration, // default: Duration::from_secs(1)
+        use_rayon_for_cpu: bool,     // default: false
     },
 }
 
@@ -169,4 +194,3 @@ pub enum ErrorStrategy {
     /// Custom error handling logic
     Custom(fn(crate::task::AsyncTaskError) -> bool),
 }
-

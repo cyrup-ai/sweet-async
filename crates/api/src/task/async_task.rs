@@ -1,11 +1,9 @@
-use crate::task::ContextualizedTask;
 use crate::orchestra::OrchestratorBuilder;
-
-
+use crate::task::ContextualizedTask;
 
 use crate::task::{
-    CancellableTask, PrioritizedTask, 
-    RecoverableTask, TracingTask, TimedTask, StatusEnabledTask, MetricsEnabledTask
+    CancellableTask, MetricsEnabledTask, PrioritizedTask, RecoverableTask, StatusEnabledTask,
+    TimedTask, TracingTask,
 };
 
 /// Core trait for all asynchronous tasks
@@ -13,19 +11,18 @@ use crate::task::{
 /// This trait provides the foundation for all specialized tasks,
 /// ensuring they maintain identity, priority, and consistent execution.
 pub trait AsyncTask<T: Send + 'static, I: crate::task::TaskId>:
-    PrioritizedTask<T> + 
-    CancellableTask<T> +
-    TracingTask<T> + 
-    TimedTask<T> +
-    ContextualizedTask<T, I> +
-    RecoverableTask<T> + 
-    StatusEnabledTask<T> +
-    MetricsEnabledTask<T>
+    PrioritizedTask<T>
+    + CancellableTask<T>
+    + TracingTask<T>
+    + TimedTask<T>
+    + ContextualizedTask<T, I>
+    + RecoverableTask<T>
+    + StatusEnabledTask<T>
+    + MetricsEnabledTask<T>
 {
     // For a Task resolving to an awaitable future
-    fn resolves_to<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
-    
+    fn to<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
+
     // For a Task that sends and receives Stream events via channels
     fn emits<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
 }
-

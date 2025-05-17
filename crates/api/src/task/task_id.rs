@@ -23,7 +23,7 @@ use std::fmt::Debug;
 /// ```rust,no_run
 /// // UUID-based TaskId
 /// use uuid::Uuid;
-/// 
+///
 /// #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// struct UuidTaskId(Uuid);
 ///
@@ -57,9 +57,11 @@ use std::fmt::Debug;
 pub trait TaskId: Debug + Copy + Eq + Ord + Send + Sync + 'static {
     /// Get the string representation of this task ID
     fn to_string(&self) -> String;
-    
+
     /// Parse a task ID from a string representation
-    fn from_string(s: &str) -> Option<Self> where Self: Sized;
+    fn from_string(s: &str) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 // Note: Specific TaskId implementations should be provided by the library receiver
