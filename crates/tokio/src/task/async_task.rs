@@ -861,17 +861,13 @@ impl<T: Clone + Send + 'static, I: TaskId> MetricsEnabledTask<T> for AsyncTask<T
 
 impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I> {
     fn to<R: Send + 'static, Task: ApiAsyncTask<R, I>>() -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
-        use crate::task::spawn::builder::TokioSpawningTaskBuilder;
-        let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
-        TokioSpawningTaskBuilder::<R, AsyncTaskError, I>::new(runtime, active_tasks)
+        use crate::builder::DefaultOrchestratorBuilder;
+        DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
     }
 
     fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I>>() -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
-        use crate::task::emit::TokioEmittingTaskBuilder;
-        let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
-        TokioEmittingTaskBuilder::<R, R, AsyncTaskError, I>::new(runtime, active_tasks)
+        use crate::builder::DefaultOrchestratorBuilder;
+        DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
     }
 }
 

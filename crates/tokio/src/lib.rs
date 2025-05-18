@@ -1,6 +1,7 @@
 pub mod runtime;
 pub mod orchestrator;
 pub mod task;
+pub mod builder;
 
 // Re-export core components
 pub use runtime::TokioRuntime;

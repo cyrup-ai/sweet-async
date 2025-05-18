@@ -13,6 +13,7 @@ pub use collector::TokioEventCollector;
 
 use std::collections::HashMap;
 use uuid::Uuid;
+use sweet_async_api::task::emit::{ReceiverEvent, FinalEvent, StreamingEventType};
 
 /// Placeholder for the final event implementation
 /// Will be fully implemented in a future PR
@@ -43,7 +44,7 @@ where
 }
 
 // This trait implementation will be completed in a future PR
-impl<T, C> sweet_async_api::task::emit::FinalEvent<T, C, C> for TokioFinalEvent<T, C>
+impl<T, C> FinalEvent<T, C, C> for TokioFinalEvent<T, C>
 where
     T: Send + 'static,
     C: Send + 'static,
@@ -58,7 +59,7 @@ where
 }
 
 // This trait implementation will be completed in a future PR  
-impl<T, C> sweet_async_api::task::emit::ReceiverEvent<T, C> for TokioFinalEvent<T, C>
+impl<T, C> ReceiverEvent<T, C> for TokioFinalEvent<T, C>
 where
     T: Send + 'static,
     C: Send + 'static,
@@ -75,7 +76,7 @@ where
         &self.data
     }
 
-    fn event_type(&self) -> &sweet_async_api::task::emit::event::StreamingEventType<T> {
+    fn event_type(&self) -> &StreamingEventType<T> {
         todo!("Not fully implemented yet")
     }
 

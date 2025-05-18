@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 /// This builder implements the core configuration options common to all task types,
 /// following the immutable builder pattern where each method returns a new instance.
 #[derive(Clone)]
-pub struct AsyncTaskBuilder<T, I>
+pub struct TokioAsyncTaskBuilder<T, I>
 where
     T: Send + 'static,
     I: TaskId,
@@ -39,7 +39,7 @@ where
     _phantom: PhantomData<(T, I)>,
 }
 
-impl<T, I> AsyncTaskBuilder<T, I>
+impl<T, I> TokioAsyncTaskBuilder<T, I>
 where
     T: Send + 'static,
     I: TaskId,
@@ -96,7 +96,7 @@ where
     }
 }
 
-impl<T, I> AsyncTaskBuilder for AsyncTaskBuilder<T, I>
+impl<T, I> sweet_async_api::task::builder::AsyncTaskBuilder for TokioAsyncTaskBuilder<T, I>
 where
     T: Send + 'static,
     I: TaskId,
@@ -106,14 +106,6 @@ where
         let runtime = Handle::current();
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
         Self::new(runtime, active_tasks)
-    }
-    
-    /// Set a descriptive name for the task
-    fn name(self, name: &str) -> Self {
-        Self {
-            name: Some(name.to_string()),
-            ..self
-        }
     }
     
     /// Set a timeout duration for task execution

@@ -1,6 +1,6 @@
-mod builder;
-mod event;
-mod task;
+pub mod builder;
+pub mod event;
+pub mod task;
 pub use event::*;
 pub use task::*;
 

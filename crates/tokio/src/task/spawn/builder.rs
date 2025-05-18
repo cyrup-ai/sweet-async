@@ -11,7 +11,7 @@ use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::SpawningTaskBuilder;
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
 
-use crate::task::builder::AsyncTaskBuilder;
+use crate::task::builder::TokioAsyncTaskBuilder;
 use crate::task::async_task::AsyncTask;
 
 /// Builder for creating and configuring spawning tasks
@@ -25,7 +25,7 @@ where
     I: TaskId,
 {
     /// The base builder with common configuration
-    base: AsyncTaskBuilder<T, I>,
+    base: TokioAsyncTaskBuilder<T, I>,
     /// Task priority
     priority: TaskPriority,
     /// Phantom data for error type parameter
@@ -44,7 +44,7 @@ where
         active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     ) -> Self {
         Self {
-            base: AsyncTaskBuilder::new(runtime, active_tasks),
+            base: TokioAsyncTaskBuilder::new(runtime, active_tasks),
             priority: TaskPriority::Normal,
             _phantom_e: PhantomData,
         }
@@ -104,12 +104,7 @@ where
         Self::new(runtime, active_tasks)
     }
 
-    fn name(self, name: &str) -> Self {
-        Self {
-            base: self.base.name(name),
-            ..self
-        }
-    }
+    // Note: name is not part of the API trait, implement on struct directly
 
     fn timeout(self, duration: std::time::Duration) -> Self {
         Self {
