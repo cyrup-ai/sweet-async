@@ -15,25 +15,25 @@ Parent-child relationships are a core aspect of structured concurrency in the Sw
 - `/crates/api/src/task/spawn/task.rs` - SpawningTask trait with child task operations
 
 **Existing Tokio Implementation:**
-- `/crates/tokio/src/task/tokio_task.rs` - Current TokioTask implementation with stubs
+- `/crates/tokio/src/task/tokio_task.rs` - Current AsyncTask implementation with stubs
 
 ## Implementation Tasks
 
-### 1. Enhance TokioTask Storage and Access
+### 1. Enhance AsyncTask Storage and Access
 
-Update the TokioTask structure in `/crates/tokio/src/task/tokio_task.rs`:
+Update the AsyncTask structure in `/crates/tokio/src/task/tokio_task.rs`:
 
 ```markdown
 Enhance storage:
 - Update `child_tasks` field to store typed child tasks rather than `Box<dyn Any>`
-- Use a more appropriate container like `HashMap<I, Arc<TokioTask<T, I>>>` for faster lookups
+- Use a more appropriate container like `HashMap<I, Arc<AsyncTask<T, I>>>` for faster lookups
 - Ensure proper synchronization with Arc<Mutex<...>> 
 - Store a strong reference to the runtime in each task
 ```
 
 ### 2. Implement ContextualizedTask Methods
 
-Update the ContextualizedTask implementation for TokioTask:
+Update the ContextualizedTask implementation for AsyncTask:
 
 ```markdown
 Methods to implement:
@@ -52,7 +52,7 @@ Methods to implement:
 
 ### 3. Implement Child Task Creation
 
-Update the SpawningTask implementation for TokioTask:
+Update the SpawningTask implementation for AsyncTask:
 
 ```markdown
 Methods to implement:

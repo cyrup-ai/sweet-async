@@ -8,7 +8,7 @@ The current Tokio implementation is partially complete with the following compon
 
 - ✅ TokioRuntime: Basic implementation of the Runtime trait
 - ✅ TokioOrchestrator: Implementation of the TaskOrchestrator trait
-- ✅ TokioTask: Implementation of the AsyncTask trait
+- ✅ AsyncTask: Implementation of the AsyncTask trait
 - ✅ Adaptive concurrency utilities
 - ❌ Builder pattern implementation
 - ❌ Event/Stream processing implementation
@@ -16,13 +16,13 @@ The current Tokio implementation is partially complete with the following compon
 ## High Priority Tasks
 
 1. **Implement Builder Pattern**
-   - Create TokioTaskBuilder implementing AsyncTaskBuilder
-   - Implement SpawningTaskBuilder for TokioTask
+   - Create AsyncTaskBuilder implementing AsyncTaskBuilder
+   - Implement SpawningTaskBuilder for AsyncTask
    - Implement EmittingTaskBuilder for event-based tasks
    - Ensure fluent API with proper method chaining
 
 2. **Complete the AsyncTask Implementation**
-   - Implement the `to()` and `emits()` static methods in TokioTask
+   - Implement the `to()` and `emits()` static methods in AsyncTask
    - Currently these are stubbed with `unimplemented!()`
 
 3. **Implement the ContextualizedTask Properly**

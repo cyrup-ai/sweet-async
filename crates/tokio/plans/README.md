@@ -2,87 +2,67 @@
 
 ![Sweet Async Logo](/assets/sweet_async.png)
 
-This directory contains detailed implementation plans for completing the Tokio implementation of the Sweet Async API. Each document outlines a specific component that needs to be implemented, along with detailed guidance on how to approach the implementation.
+This directory contains detailed implementation plans for completing the Tokio implementation of Sweet Async. These plans serve as a comprehensive guide for developers working on the implementation.
 
-## Overview
+## Plan Documents
 
-The Sweet Async API provides an immutable, fluent builder for orchestrating asynchronous work with powerful abstractions for complex async workflows. The current Tokio implementation is partially complete, with several key components missing or stubbed out. These implementation plans provide a roadmap for completing the implementation to fully match the API specification.
+- **[Implementation Overview](implementation_overview.md)** - High-level overview of the implementation approach and structure
+- **[Builder Pattern PR](builder_pattern_pr.md)** - Detailed plan for implementing the builder pattern
+- **[AsyncTask Completion PR](async_task_completion_pr.md)** - Plan for completing the AsyncTask implementation
+- **[Event Processing PR](event_processing_pr.md)** - Plan for implementing the event processing system
+- **[Implementation Roadmap](implementation_roadmap.md)** - Timeline and priorities for the implementation process
 
-## Implementation Tracks
+## Getting Started
 
-Each implementation track has its own plan document:
+To begin implementing the Tokio crate:
 
-1. [**Builder Pattern Implementation**](./builder_implementation.md)
-   - Implementing the immutable builder pattern for Tokio tasks
-   - Creating builders for both future-based and event-based tasks
-   - Integrating builders with the Tokio runtime and orchestrator
+1. Review the [Implementation Overview](implementation_overview.md) to understand the big picture
+2. Start with the [Builder Pattern PR](builder_pattern_pr.md), which provides the foundation
+3. Follow the implementation sequence outlined in the plans
+4. Use the provided code examples as a reference for your implementation
+5. Ensure all tests pass before moving to the next component
 
-2. [**AsyncTask Implementation Completion**](./async_task_completion.md)
-   - Completing the static methods in the AsyncTask trait
-   - Implementing OrchestratorBuilder for different task types
-   - Finishing the SpawningTask trait implementation
+## Implementation Principles
 
-3. [**Parent-Child Relationship Implementation**](./parent_child_implementation.md)
-   - Properly implementing the ContextualizedTask trait
-   - Adding child task tracking and management
-   - Implementing cancellation propagation for task hierarchies
+When implementing the Tokio crate, follow these key principles:
 
-4. [**Task Chain Implementation**](./task_chain_implementation.md)
-   - Implementing the `chain()` method for task composition
-   - Creating task chain structures and Future implementations
-   - Supporting different chaining patterns and error handling
+1. **API Compatibility**: Don't modify the API crate - implement to match the existing API
+2. **Immutability**: Follow the immutable builder pattern throughout
+3. **Type Safety**: Maintain strong typing and proper generic constraints
+4. **Thread Safety**: Ensure concurrency safety with proper synchronization
+5. **Clean Code**: Follow Rust best practices and maintain high code quality
 
-5. [**Event Processing Implementation**](./event_processing_implementation.md)
-   - Adding event-based task execution with streaming
-   - Implementing different processing strategies
-   - Creating event collectors and channel mechanisms
+## Testing Strategy
 
-## Implementation Approach
+Each component should be thoroughly tested:
 
-Each component should be implemented with these principles in mind:
+- Unit tests for individual functions and methods
+- Integration tests for component interaction
+- Property tests for invariants and contracts
+- Performance tests for critical paths
 
-1. **API Compatibility**: Do not modify the API crate; ensure the implementation matches the existing API contracts.
+## Contributing
 
-2. **Immutability**: Follow the immutable builder pattern used throughout the API.
+When working on the implementation:
 
-3. **Type Safety**: Maintain strong typing and proper generic parameter handling.
+1. Create a branch for each PR (e.g., `tokio-builder-pattern`)
+2. Follow the implementation plan for that component
+3. Add comprehensive tests as you go
+4. Document all public APIs
+5. Submit a PR for review when complete
 
-4. **Thread Safety**: Ensure all implementations are thread-safe and work properly in concurrent environments.
+## Visual Overview
 
-5. **Error Handling**: Implement comprehensive error handling and propagation.
+The implementation plan follows a dependency structure:
 
-## Dependencies Between Components
-
-The implementation components have dependencies that suggest an optimal implementation order:
-
-1. **Builder Pattern** - Foundation for task creation
-2. **AsyncTask Completion** - Core task abstraction
-3. **Parent-Child Relationships** - Task hierarchy support
-4. **Task Chaining** - Task composition capability
-5. **Event Processing** - Stream-based task execution
-
-While there are dependencies, many components can be implemented in parallel by different teams, with appropriate coordination.
-
-## Testing
-
-Each component should include comprehensive tests covering:
-
-- Basic functionality and API compatibility
-- Edge cases and error handling
-- Performance characteristics
-- Integration with other components
-
-## Documentation
-
-As each component is implemented, documentation should be updated to include:
-
-- API documentation with examples
-- Integration guides
-- Performance considerations
-- Design rationales
-
-## Conclusion
-
-Completing these implementations will result in a full-featured Tokio implementation of the Sweet Async API, offering both future-based and stream-based task execution with the same ergonomic interface as specified in the API.
+```
+Builder Pattern PR (foundation)
+        │
+        ▼
+AsyncTask Completion PR (task relationships)
+        │
+        ▼
+Event Processing PR (streaming capability)
+```
 
 ![Book](/assets/book.png)

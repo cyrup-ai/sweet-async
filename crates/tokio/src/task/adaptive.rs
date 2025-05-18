@@ -1,46 +1,51 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+//! Adaptive concurrency system that automatically selects between:
+//!   - CPU-bound mode -> Uses Rayon + chunking
+//!   - IO-bound mode  -> Uses Tokio one-by-one tasks
+//!   - Mixed mode     -> Uses Tokio, moderate chunk size
+//!
+//! We hide all async behind normal methods and a `Stream` so that
+//! the user doesn't need to deal with `async_trait` or pinned futures.
 
 use futures::Stream;
-use tokio::sync::{Mutex, mpsc, Semaphore};
+use num_cpus;
+use rayon::ThreadPool;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::{mpsc, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, warn};
 
-/// Types of workloads that can be detected and optimized for
+// =============== Workload Classification ===============
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkloadType {
-    /// CPU-bound workloads benefit from parallel processing with dedicated thread pools
     CpuBound,
-    /// IO-bound workloads benefit from high concurrency with async operations
     IoBound,
-    /// Mixed workloads have characteristics of both CPU and IO bound operations
     Mixed,
 }
 
-/// Configuration for adaptive concurrency 
+// =============== Adaptix Configuration ===============
 #[derive(Debug, Clone)]
-pub struct AdaptiveConfig {
-    /// Minimum number of concurrent workers
+pub struct AdaptixConfig {
     pub min_workers: usize,
-    /// Maximum number of concurrent workers
     pub max_workers: usize,
-    /// Sample size for duration tracking
     pub sample_size: usize,
-    /// Threshold in milliseconds to classify as IO-bound
     pub io_threshold_ms: u64,
-    /// Interval in milliseconds between adaptation checks
     pub adapt_interval_ms: u64,
-    /// Chunk size for CPU-bound operations
+
+    /// When CPU-bound, how many items to process in a single chunk job?
     pub cpu_chunk_size: usize,
-    /// Chunk size for IO-bound operations
+
+    /// When IO-bound, how many items to process in a single chunk job?
+    /// Usually 1, but you could tweak if you want some micro-batching.
     pub io_chunk_size: usize,
-    /// Chunk size for mixed workloads
+
+    /// For "Mixed" workloads, chunk size can be somewhere in between.
     pub mixed_chunk_size: usize,
-    /// Whether to cancel partial chunks when switching modes
-    pub partial_cancel: bool,
 }
 
-impl Default for AdaptiveConfig {
+impl Default for AdaptixConfig {
     fn default() -> Self {
         let cpus = num_cpus::get().max(1);
         Self {
@@ -52,21 +57,40 @@ impl Default for AdaptiveConfig {
             cpu_chunk_size: 64,
             io_chunk_size: 1,
             mixed_chunk_size: 16,
-            partial_cancel: false,
         }
     }
 }
 
-/// Engine types for processing chunks of work
+// =============== ConcurrencyEngine Enum ===============
+//  - Either use Rayon or use Tokio.
+//  - We'll embed a thread pool for Rayon for CPU-bound tasks.
+
+#[derive(Clone)]
 enum ConcurrencyEngine {
-    /// Uses blocking workers for CPU-intensive work
-    Rayon,
-    /// Uses asynchronous tasks for IO-bound work
+    Rayon { pool: Arc<ThreadPool> },
     Tokio,
 }
 
 impl ConcurrencyEngine {
-    /// Spawns a chunk of work on the appropriate engine
+    /// Build a new Rayon engine with `threads` number of threads.
+    fn new_rayon(threads: usize) -> Self {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("Failed to build Rayon ThreadPool");
+        ConcurrencyEngine::Rayon {
+            pool: Arc::new(pool),
+        }
+    }
+
+    /// Build a new Tokio engine (just an enum variant for identification).
+    fn new_tokio() -> Self {
+        ConcurrencyEngine::Tokio
+    }
+
+    /// Spawn a "chunk job" returning a Vec of outputs. We unify the interface
+    /// so that CPU-bound uses parallel iteration and IO-bound uses normal iteration.
+    /// We still submit the entire chunk to either the Rayon pool or a Tokio task.
     fn spawn_chunk<Item, Out, F>(
         &self,
         chunk: Vec<Item>,
@@ -79,202 +103,391 @@ impl ConcurrencyEngine {
         F: Fn(&Item) -> Out + Send + Sync + 'static,
     {
         match self {
-            ConcurrencyEngine::Rayon if cpu_bound => {
+            ConcurrencyEngine::Rayon { pool } if cpu_bound => {
+                // CPU-bound => parallel map using rayon
                 let (tx, rx) = mpsc::channel(1);
-                
-                // Use a blocking task to simulate rayon-like behavior
-                let map_fn_cl = map_fn.clone();
-                tokio::task::spawn_blocking(move || {
-                    let start = std::time::Instant::now();
-                    let result: Vec<Out> = chunk.iter().map(|it| map_fn_cl(it)).collect();
-                    debug!("Rayon chunk job took {:?}", start.elapsed());
+                let pool_clone = Arc::clone(pool);
+                pool_clone.spawn_fifo(move || {
+                    let result: Vec<Out> = chunk.iter().map(|item| map_fn(item)).collect();
                     let _ = tx.blocking_send(result);
                 });
-                
                 EngineTask::Rayon(rx)
             }
-            ConcurrencyEngine::Rayon => {
+            ConcurrencyEngine::Rayon { pool } => {
+                // If we ended up here but it's not "strictly" CPU-bound, we can still do parallel
+                // or we could do a normal serial iteration.
+                // We'll just do parallel anyway for brevity.
                 let (tx, rx) = mpsc::channel(1);
-                
-                // Use a blocking task for non-CPU-bound work too when using Rayon engine
-                let map_fn_cl = map_fn.clone();
-                tokio::task::spawn_blocking(move || {
-                    let start = std::time::Instant::now();
-                    let result: Vec<Out> = chunk.iter().map(|it| map_fn_cl(it)).collect();
-                    debug!("Rayon chunk job took {:?}", start.elapsed());
+                let pool_clone = Arc::clone(pool);
+                pool_clone.spawn_fifo(move || {
+                    let result: Vec<Out> = chunk.iter().map(|item| map_fn(item)).collect();
                     let _ = tx.blocking_send(result);
                 });
-                
                 EngineTask::Rayon(rx)
             }
             ConcurrencyEngine::Tokio => {
+                // IO-bound => spawn an async job that processes the chunk in normal iteration.
                 let (tx, rx) = mpsc::channel(1);
-                
-                // Use a regular async task for Tokio engine
-                let map_fn_cl = map_fn.clone(); 
                 tokio::spawn(async move {
-                    let start = std::time::Instant::now();
-                    let result: Vec<Out> = chunk.into_iter().map(|it| map_fn_cl(&it)).collect();
-                    debug!("Tokio chunk job took {:?}", start.elapsed());
-                    let _ = tx.send(result).await;
+                    let result: Vec<Out> = chunk.into_iter().map(|item| map_fn(&item)).collect();
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Tokio chunk job failed to send: {e}");
+                    }
                 });
-                
-                EngineTask::Tokio(rx)
+                EngineTask::Tokio(rx) // Use appropriate variant - was incorrectly using Rayon
             }
         }
     }
 }
 
-/// A task spawned by either the Rayon or Tokio engine
+/// A unified "handle" for a spawned chunk job from either engine.
 enum EngineTask<T> {
-    /// A task spawned with blocking capabilities
+    /// For Rayon, we send the result through an mpsc channel.
     Rayon(mpsc::Receiver<T>),
-    /// A task spawned with async capabilities
+    /// For Tokio, we send the result through an mpsc channel.
     Tokio(mpsc::Receiver<T>),
 }
 
 impl<T: Send + 'static> EngineTask<T> {
-    /// Wait for the task to complete and return its result
-    async fn wait(self) -> Result<T, String> {
+    /// Wait for the chunk result.
+    /// Synchronous from the outside, but uses `block_on` inside.
+    pub fn wait(self) -> Result<T, String> {
+        let rt = tokio::runtime::Handle::current();
         match self {
-            EngineTask::Rayon(mut rx) => {
-                rx.recv().await.ok_or("Rayon channel closed".to_string())
-            }
-            EngineTask::Tokio(mut rx) => {
-                rx.recv().await.ok_or("Tokio channel closed".to_string())
-            }
+            EngineTask::Rayon(mut rx) => rt.block_on(async {
+                rx.recv()
+                    .await
+                    .ok_or_else(|| "Channel closed unexpectedly".to_string())
+            }),
+            EngineTask::Tokio(mut rx) => rt.block_on(async {
+                rx.recv()
+                    .await
+                    .ok_or_else(|| "Channel closed unexpectedly".to_string())
+            }),
         }
     }
 }
 
-/// Statistics for tracking execution durations
-#[derive(Default)]
-struct ModeStats {
-    durations: Vec<Duration>,
-}
+// =============== Stats & Adaptation ===============
 
-impl ModeStats {
-    /// Calculate the median duration
-    fn median(&self) -> Option<Duration> {
-        if self.durations.is_empty() {
-            return None;
-        }
-        
-        let mut ds = self.durations.clone();
-        ds.sort();
-        
-        Some(ds[ds.len() / 2])
-    }
-}
-
-/// State for adaptation decision making
-struct AdaptStats {
-    /// Ring buffer of recent durations
-    ring: ModeStats,
-    /// Time of last adaptation
+struct AdaptixStats {
+    // We measure "chunk tasks" durations
+    task_durations: Vec<Duration>,
     last_adapt: Instant,
-    /// Current worker count
     current_workers: usize,
-    /// Current workload type
     workload_type: WorkloadType,
-    /// Current chunk size
+    engine: ConcurrencyEngine,
     chunk_size: usize,
 }
 
-impl AdaptStats {
+impl AdaptixStats {
     fn new() -> Self {
         let cpus = num_cpus::get().max(1);
-        
         Self {
-            ring: ModeStats::default(),
+            task_durations: Vec::new(),
             last_adapt: Instant::now(),
-            current_workers: cpus,
-            workload_type: WorkloadType::Mixed, // Start in mixed mode
-            chunk_size: 16, // Start with a moderate chunk size
+            current_workers: cpus, // start guess
+            workload_type: WorkloadType::Mixed,
+            engine: ConcurrencyEngine::new_tokio(), // start guess
+            chunk_size: 16,                         // start guess
+        }
+    }
+
+    /// Clone the concurrency engine (Arc if needed).
+    fn engine_clone(&self) -> ConcurrencyEngine {
+        match &self.engine {
+            ConcurrencyEngine::Rayon { pool } => ConcurrencyEngine::Rayon {
+                pool: Arc::clone(pool),
+            },
+            ConcurrencyEngine::Tokio => ConcurrencyEngine::Tokio,
         }
     }
 }
 
-/// Adapt concurrency based on execution statistics
-fn adapt_concurrency(
-    st: &mut AdaptStats,
-    cfg: &AdaptiveConfig,
-    in_flight: &mut Vec<tokio::task::JoinHandle<(Vec<()>, Duration)>>,
-) {
-    let median = match st.ring.median() {
-        Some(m) => m,
-        None => return,
-    };
-    
-    // Interpret median > threshold => IO, < threshold => CPU, else Mixed
-    let ms = median.as_millis() as u64;
-    let new_type = if ms > cfg.io_threshold_ms {
+/// Decide if we should switch between CPU-bound (Rayon) or IO-bound (Tokio),
+/// possibly adjusting concurrency and chunk sizes for the next batch of chunks.
+fn adapt_concurrency(st: &mut AdaptixStats, cfg: &AdaptixConfig) {
+    let total: Duration = st.task_durations.iter().sum();
+    let count = st.task_durations.len();
+    if count == 0 {
+        return;
+    }
+
+    let avg = total / (count as u32);
+
+    // Count how many chunk tasks exceeded the "IO threshold"
+    let io_like = st
+        .task_durations
+        .iter()
+        .filter(|d| d.as_millis() > cfg.io_threshold_ms as u128)
+        .count();
+    let ratio = (io_like as f64) / (count as f64);
+
+    let new_type = if ratio > 0.8 {
         WorkloadType::IoBound
-    } else {
+    } else if ratio < 0.2 {
         WorkloadType::CpuBound
-    };
-    
-    // More nuanced classification for mixed workloads
-    if matches!(new_type, WorkloadType::CpuBound) && ms > (cfg.io_threshold_ms / 2) {
-        // Near the threshold, call it Mixed
-        if ms > (cfg.io_threshold_ms * 2 / 3) {
-            st.workload_type = WorkloadType::Mixed;
-        } else {
-            st.workload_type = new_type;
-        }
     } else {
-        st.workload_type = new_type;
-    }
-    
-    // Get CPU count for concurrency decisions
-    let cpus = num_cpus::get().max(1);
-    
-    // Incrementally ramp chunk_size to target
-    if st.workload_type == WorkloadType::CpuBound && st.chunk_size < cfg.cpu_chunk_size {
-        st.chunk_size = (st.chunk_size + cfg.cpu_chunk_size) / 2; // ramp up
-    } else if st.workload_type == WorkloadType::IoBound && st.chunk_size > cfg.io_chunk_size {
-        st.chunk_size = (st.chunk_size + cfg.io_chunk_size) / 2; // ramp down
-    } else if st.workload_type == WorkloadType::Mixed 
-        && st.chunk_size != cfg.mixed_chunk_size
-    {
-        st.chunk_size = (st.chunk_size + cfg.mixed_chunk_size) / 2;
-    }
-    
-    // Determine worker count based on workload type
-    let new_workers = match st.workload_type {
-        WorkloadType::CpuBound => cpus.clamp(cfg.min_workers, cfg.max_workers),
-        WorkloadType::IoBound => (cpus * 2).clamp(cfg.min_workers, cfg.max_workers),
-        WorkloadType::Mixed => ((cpus * 3) / 2).clamp(cfg.min_workers, cfg.max_workers),
+        WorkloadType::Mixed
     };
-    
-    debug!(
-        "Adapting concurrency: workload={:?}, chunk_size={}, workers={}, median_ms={}",
-        st.workload_type, st.chunk_size, new_workers, ms
-    );
-    
-    // Update state
-    st.current_workers = new_workers;
-    st.ring.durations.clear();
+    st.workload_type = new_type;
+
+    // Decide concurrency + engine + chunk size
+    let cpus = num_cpus::get().max(1);
+    match new_type {
+        WorkloadType::CpuBound => {
+            // Switch to Rayon
+            st.engine = ConcurrencyEngine::new_rayon(cpus);
+            st.current_workers = cpus.clamp(cfg.min_workers, cfg.max_workers);
+            st.chunk_size = cfg.cpu_chunk_size;
+        }
+        WorkloadType::IoBound => {
+            // Switch to Tokio
+            st.engine = ConcurrencyEngine::new_tokio();
+            let desired = (cpus * 2).clamp(cfg.min_workers, cfg.max_workers);
+            st.current_workers = desired;
+            st.chunk_size = cfg.io_chunk_size;
+        }
+        WorkloadType::Mixed => {
+            // Use Tokio for "mixed"
+            st.engine = ConcurrencyEngine::new_tokio();
+            let desired = ((cpus * 3) / 2).clamp(cfg.min_workers, cfg.max_workers);
+            st.current_workers = desired;
+            st.chunk_size = cfg.mixed_chunk_size;
+        }
+    }
+
+    st.task_durations.clear();
     st.last_adapt = Instant::now();
-    
-    // If partial_cancel is enabled, cancel in-flight tasks when switching modes
-    if cfg.partial_cancel {
-        if (matches!(st.workload_type, WorkloadType::CpuBound) && ms > cfg.io_threshold_ms * 2) ||
-           (matches!(st.workload_type, WorkloadType::IoBound) && ms < cfg.io_threshold_ms / 2) 
-        {
-            debug!("Cancelling {} in-flight tasks due to major mode switch", in_flight.len());
-            for jh in in_flight.drain(..) {
-                jh.abort();
+
+    debug!(
+        "Adapt concurrency -> new_mode={:?}, chunk_size={}, concurrency={}, avg_chunk_time={:?}",
+        new_type, st.chunk_size, st.current_workers, avg
+    );
+}
+
+// =============== The DSL and build_adaptix_stream ===============
+
+/// DSL inputs for building a parallel (or chunked) stream.
+pub struct AdaptixDsl<I, F> {
+    pub config: AdaptixConfig,
+    pub items: I,
+    pub map_fn: F,
+}
+
+/// Build the adaptive chunked stream. The returned `impl Stream<Item=Out>`
+/// yields items in the same order that chunk tasks complete. If chunk tasks
+/// complete out of order, items could appear out of order—**this example**
+/// just forwards chunk results as soon as they're done.
+/// You can make it more complex to preserve original ordering if needed.
+pub fn build_adaptix_stream<It, Item, MapFn, Out>(
+    dsl: AdaptixDsl<It, MapFn>,
+) -> impl Stream<Item = Out>
+where
+    // We accept any IntoIterator for the input
+    It: IntoIterator<Item = Item> + Send + 'static,
+    <It as IntoIterator>::IntoIter: Send,
+    Item: Send + Sync + 'static,
+    // The map_fn is a standard Fn(&Item)->Out (sync).
+    MapFn: Fn(&Item) -> Out + Send + Sync + 'static,
+    Out: Send + 'static,
+{
+    let AdaptixDsl {
+        config,
+        items,
+        map_fn,
+    } = dsl;
+
+    let (tx_out, rx_out) = mpsc::channel::<Out>(config.max_workers.saturating_mul(2));
+    let map_fn = Arc::new(map_fn);
+
+    // We'll spawn a single aggregator that:
+    //   1) Takes items from the iterator
+    //   2) Batches them into "chunk_size"
+    //   3) Spawns chunk jobs on either Rayon or Tokio
+    //   4) Limits concurrency with a semaphore
+    //   5) Measures time, updates stats, possibly calls adapt_concurrency
+
+    tokio::spawn(async move {
+        let mut stats = AdaptixStats::new();
+        let concurrency_sema = Arc::new(Semaphore::new(stats.current_workers));
+
+        // We store items in a local Vec until we reach chunk_size, then spawn a job.
+        let mut chunk_buf = Vec::with_capacity(stats.chunk_size);
+
+        // We'll turn the input iterator into an explicit list so we can .into_iter().
+        // If we had a streaming input, we'd adapt differently.
+        let mut input_iter = items.into_iter();
+
+        // Helper closure for spawning chunk jobs
+        let spawn_chunk_job = |chunk: Vec<Item>, st: &mut AdaptixStats| {
+            if chunk.is_empty() {
+                return None;
+            }
+
+            // Acquire concurrency permit
+            let sema_cl = Arc::clone(&concurrency_sema);
+            let map_cl = Arc::clone(&map_fn);
+            let engine_clone = st.engine_clone();
+
+            let start = Instant::now();
+            let cpu_bound = matches!(st.workload_type, WorkloadType::CpuBound);
+
+            // Spawn the chunk
+            let task = engine_clone.spawn_chunk(chunk, map_cl, cpu_bound);
+
+            // Now we create an async block that awaits the chunk's completion,
+            // then updates stats, possibly adapts concurrency, and sends outputs.
+            let join_handle = tokio::spawn(async move {
+                // Wait for permit
+                let _permit = sema_cl.acquire_owned().await.unwrap();
+
+                let outputs = match task.wait() {
+                    Ok(o) => o,
+                    Err(e) => {
+                        warn!("Chunk job failed: {e}");
+                        Vec::new()
+                    }
+                };
+
+                // Return timing and outputs
+                (outputs, start.elapsed())
+            });
+
+            Some(join_handle)
+        };
+
+        // We'll keep a small list of in-flight chunk job handles.
+        // When each finishes, we push its results into tx_out.
+        // Then we might adapt concurrency if needed.
+        let mut in_flight = Vec::new();
+
+        // PROCESS INPUT
+        loop {
+            // If we need to fetch the next item (non-blocking in a real scenario),
+            // do so. If we have no more input, we break out.
+            let next_item = input_iter.next();
+            match next_item {
+                Some(item) => {
+                    chunk_buf.push(item);
+                    // If we have a full chunk, spawn a chunk job
+                    if chunk_buf.len() >= stats.chunk_size {
+                        let chunk =
+                            std::mem::replace(&mut chunk_buf, Vec::with_capacity(stats.chunk_size));
+                        if let Some(fut) = spawn_chunk_job(chunk, &mut stats) {
+                            in_flight.push(fut);
+                        }
+                    }
+                }
+                None => {
+                    // End of input
+                    if !chunk_buf.is_empty() {
+                        let chunk = std::mem::take(&mut chunk_buf);
+                        if let Some(fut) = spawn_chunk_job(chunk, &mut stats) {
+                            in_flight.push(fut);
+                        }
+                    }
+                    break;
+                }
             }
         }
-    }
+
+        // Now we have in_flight tasks that eventually produce (Vec<Out>, Duration).
+        // We drain them in the order they complete.
+        for handle in in_flight {
+            match handle.await {
+                Ok((outputs, duration)) => {
+                    // Update stats
+                    stats.task_durations.push(duration);
+                    // Send each item
+                    for out in outputs {
+                        if tx_out.send(out).await.is_err() {
+                            // receiver closed
+                            break;
+                        }
+                    }
+
+                    // Possibly adapt concurrency
+                    if stats.task_durations.len() >= config.sample_size
+                        && stats.last_adapt.elapsed().as_millis() > config.adapt_interval_ms as u128
+                    {
+                        adapt_concurrency(&mut stats, &config);
+                        // Update the concurrency semaphore size
+                        concurrency_sema.close();
+                        concurrency_sema.add_permits(
+                            stats
+                                .current_workers
+                                .saturating_sub(concurrency_sema.available_permits()),
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Chunk aggregator join error: {e}");
+                }
+            }
+        }
+
+        // Done sending
+        drop(tx_out);
+    });
+
+    // The aggregator runs in the background. We return a `ReceiverStream`
+    // that yields all the items the aggregator produces.
+    ReceiverStream::new(rx_out)
 }
 
-/// Create an adaptive stream that processes items with optimized concurrency
+// =============== DSL Macros (optional) ===============
+
+#[macro_export]
+macro_rules! adaptix {
+    ( $($body:tt)* ) => {
+        $crate::adaptix_parse!( $($body)* )
+    };
+}
+
+#[macro_export]
+macro_rules! adaptix_parse {
+    (
+        config {
+            $($cfg_key:ident = $cfg_val:expr),* $(,)?
+        },
+        items($items:expr),
+        map $map_expr:tt
+    ) => {{
+        let mut cfg = $crate::AdaptixConfig::default();
+        $(
+            cfg.$cfg_key = $cfg_val;
+        )*
+        fn local_map() -> impl Fn(&_) -> _ + Copy + Send + Sync + 'static {
+            $crate::adaptix_map! $map_expr
+        }
+        $crate::build_adaptix_stream($crate::AdaptixDsl {
+            config: cfg,
+            items: $items,
+            map_fn: local_map(),
+        })
+    }};
+}
+
+#[macro_export]
+macro_rules! adaptix_map {
+    (|$val:ident| { $($body:tt)* }) => {
+        move |$val| {
+            $($body)*
+        }
+    };
+    // or if you want an async block, you can do something else, but
+    // in CPU-bound we typically won't do async.
+}
+
+/// Export adaptive config as AdaptiveConfig for API compatibility
+pub use AdaptixConfig as AdaptiveConfig;
+
+/// Export build_adaptix_stream with a more consistent API name
 pub fn adaptive_stream<It, Item, MapFn, Out>(
     items: It,
     map_fn: MapFn,
-    cfg: AdaptiveConfig,
+    config: AdaptiveConfig,
 ) -> impl Stream<Item = Out>
 where
     It: IntoIterator<Item = Item> + Send + 'static,
@@ -283,144 +496,30 @@ where
     MapFn: Fn(&Item) -> Out + Send + Sync + 'static,
     Out: Send + 'static,
 {
-    let (tx_out, rx_out) = mpsc::channel::<Out>(cfg.max_workers.saturating_mul(2));
-    let map_fn = Arc::new(map_fn);
+    build_adaptix_stream(AdaptixDsl {
+        config,
+        items,
+        map_fn,
+    })
+}
+
+/// Process a stream using adaptive concurrency
+pub async fn process_adaptive<It, Item, F, Out>(
+    items: It,
+    map_fn: F,
+    config: Option<AdaptiveConfig>,
+) -> Vec<Out>
+where
+    It: IntoIterator<Item = Item> + Send + 'static,
+    <It as IntoIterator>::IntoIter: Send,
+    Item: Send + Sync + 'static,
+    F: Fn(&Item) -> Out + Send + Sync + 'static,
+    Out: Send + 'static,
+{
+    use futures::StreamExt;
     
-    tokio::spawn(async move {
-        let mut st = AdaptStats::new();
-        let concurrency_sema = Arc::new(Semaphore::new(st.current_workers));
-        let mut chunk_buf = Vec::with_capacity(st.chunk_size);
-        
-        let mut input_iter = items.into_iter();
-        let mut in_flight: Vec<tokio::task::JoinHandle<(Vec<Out>, Duration)>> = Vec::new();
-        
-        // Helper function to spawn a chunk job
-        fn spawn_chunk_job<Item, Out>(
-            chunk: Vec<Item>,
-            st: &mut AdaptStats,
-            map_fn: &Arc<dyn Fn(&Item) -> Out + Send + Sync + 'static>,
-            sema_cl: &Arc<Semaphore>,
-            cfg: &AdaptiveConfig,
-        ) -> Option<tokio::task::JoinHandle<(Vec<Out>, Duration)>>
-        where
-            Item: Send + Sync + 'static,
-            Out: Send + 'static,
-        {
-            if chunk.is_empty() {
-                return None;
-            }
-            
-            let start = Instant::now();
-            let cpu_bound = matches!(st.workload_type, WorkloadType::CpuBound);
-            let engine = if cpu_bound {
-                ConcurrencyEngine::Rayon
-            } else {
-                ConcurrencyEngine::Tokio
-            };
-            
-            let map_cl = Arc::clone(map_fn);
-            let sema_c = Arc::clone(sema_cl);
-            
-            let task = engine.spawn_chunk(chunk, map_cl, cpu_bound);
-            
-            Some(tokio::spawn(async move {
-                let _permit = sema_c.acquire_owned().await.unwrap();
-                let outputs = match task.wait().await {
-                    Ok(o) => o,
-                    Err(e) => {
-                        warn!("Chunk job failed: {e}");
-                        Vec::new()
-                    }
-                };
-                
-                (outputs, start.elapsed())
-            }))
-        }
-        
-        // Process the input iterator
-        loop {
-            let next_item = input_iter.next();
-            
-            match next_item {
-                Some(it) => {
-                    chunk_buf.push(it);
-                    
-                    if chunk_buf.len() >= st.chunk_size {
-                        let chunk = std::mem::take(&mut chunk_buf);
-                        
-                        if let Some(fut) = spawn_chunk_job(
-                            chunk,
-                            &mut st,
-                            &map_fn,
-                            &concurrency_sema,
-                            &cfg,
-                        ) {
-                            in_flight.push(fut);
-                        }
-                    }
-                }
-                None => {
-                    if !chunk_buf.is_empty() {
-                        let chunk = std::mem::take(&mut chunk_buf);
-                        
-                        if let Some(fut) = spawn_chunk_job(
-                            chunk,
-                            &mut st,
-                            &map_fn,
-                            &concurrency_sema,
-                            &cfg,
-                        ) {
-                            in_flight.push(fut);
-                        }
-                    }
-                    
-                    break;
-                }
-            }
-        }
-        
-        // Process in-flight tasks
-        for handle in &mut in_flight {
-            match handle.await {
-                Ok((outputs, dur)) => {
-                    st.ring.durations.push(dur);
-                    
-                    for out_val in outputs {
-                        if tx_out.send(out_val).await.is_err() {
-                            break;
-                        }
-                    }
-                    
-                    // Check if we should adapt
-                    let now = Instant::now();
-                    if st.ring.durations.len() >= cfg.sample_size
-                        && now.duration_since(st.last_adapt).as_millis()
-                            > cfg.adapt_interval_ms as u128
-                    {
-                        adapt_concurrency(&mut st, &cfg, &mut in_flight);
-                        
-                        // Update concurrency
-                        concurrency_sema.close();
-                        concurrency_sema.add_permits(
-                            st.current_workers
-                                .saturating_sub(concurrency_sema.available_permits()),
-                        );
-                    }
-                }
-                Err(e) => {
-                    if e.is_cancelled() {
-                        debug!("Chunk job was cancelled");
-                    } else {
-                        warn!("Chunk job failed: {e}");
-                    }
-                }
-            }
-        }
-        
-        debug!("Adaptive stream processing complete");
-        in_flight.clear();
-        drop(tx_out);
-    });
+    let cfg = config.unwrap_or_default();
+    let stream = adaptive_stream(items, map_fn, cfg);
     
-    ReceiverStream::new(rx_out)
+    stream.collect().await
 }

@@ -31,6 +31,9 @@ lazy_static = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 num_cpus = { workspace = true }
+rayon = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+rand = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

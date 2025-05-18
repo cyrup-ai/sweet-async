@@ -15,13 +15,13 @@ Task chaining is a powerful feature of the Sweet Async API that allows for compo
 - `/crates/api/src/task/spawn/into_async_result.rs` - Type conversions for task results
 
 **Existing Tokio Implementation:**
-- `/crates/tokio/src/task/tokio_task.rs` - Current TokioTask implementation with stubs
+- `/crates/tokio/src/task/tokio_task.rs` - Current AsyncTask implementation with stubs
 
 ## Implementation Tasks
 
 ### 1. Implement Task Chaining Method
 
-Update the TokioTask struct in `/crates/tokio/src/task/tokio_task.rs` to implement the chain method:
+Update the AsyncTask struct in `/crates/tokio/src/task/tokio_task.rs` to implement the chain method:
 
 ```markdown
 Method to implement:
@@ -31,14 +31,14 @@ Method to implement:
   - Returns a future representing the combined operation
 ```
 
-### 2. Create TokioTaskChain Structure
+### 2. Create AsyncTaskChain Structure
 
 Create a new file `/crates/tokio/src/task/spawn/chain.rs`:
 
 ```markdown
 Create:
-- `TokioTaskChain<T, U, I>` struct that holds the chained tasks
-  - First task of type TokioTask<T, I>
+- `AsyncTaskChain<T, U, I>` struct that holds the chained tasks
+  - First task of type AsyncTask<T, I>
   - Second task (the continuation) of type F where F: AsyncWork<U>
   - Propagates task identity, context, and other properties
 ```
@@ -47,7 +47,7 @@ Create:
 
 ```markdown
 Implement:
-- `Future` trait for `TokioTaskChain`
+- `Future` trait for `AsyncTaskChain`
   - Poll first task until completion
   - On completion, poll second task with first task's result
   - Properly handle task cancellation

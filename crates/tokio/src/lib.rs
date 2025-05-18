@@ -1,13 +1,11 @@
-mod runtime;
-mod orchestrator;
-mod task;
-mod utils;
+pub mod runtime;
+pub mod orchestrator;
+pub mod task;
 
 // Re-export core components
 pub use runtime::TokioRuntime;
 pub use orchestrator::TokioOrchestrator;
-pub use task::*;
-pub use utils::*;
+pub use runtime::safe_blocking;
 
 /// Create a new Tokio runtime using the current handle
 pub fn new_runtime() -> TokioRuntime {
@@ -20,6 +18,6 @@ pub fn new_runtime_with_config(workers: usize) -> TokioRuntime {
 }
 
 /// Create a new Tokio orchestrator using the given runtime
-pub fn new_orchestrator(runtime: TokioRuntime) -> TokioOrchestrator<(), impl sweet_async_api::task::TaskId> {
+pub fn new_orchestrator(runtime: TokioRuntime) -> TokioOrchestrator<(), uuid::Uuid> {
     TokioOrchestrator::new(runtime)
 }

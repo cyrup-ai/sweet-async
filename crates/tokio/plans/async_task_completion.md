@@ -15,13 +15,13 @@ The `AsyncTask` trait is the core abstraction in the Sweet Async API, composed o
 - `/crates/api/src/orchestra/orchestrator_builder.rs` - OrchestratorBuilder trait
 
 **Existing Tokio Implementation:**
-- `/crates/tokio/src/task/tokio_task.rs` - Current TokioTask implementation
+- `/crates/tokio/src/task/tokio_task.rs` - Current AsyncTask implementation
 
 ## Implementation Tasks
 
 ### 1. Complete the AsyncTask Trait Methods
 
-Update the TokioTask implementation in `/crates/tokio/src/task/tokio_task.rs` to implement the static methods:
+Update the AsyncTask implementation in `/crates/tokio/src/task/tokio_task.rs` to implement the static methods:
 
 ```markdown
 Methods to implement:
@@ -49,7 +49,7 @@ Components to implement:
 
 ### 3. Complete the SpawningTask Trait Methods
 
-Update the TokioTask implementation to complete these methods:
+Update the AsyncTask implementation to complete these methods:
 
 ```markdown
 Methods to implement:

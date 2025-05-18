@@ -7,7 +7,14 @@
       "Bash(mv:*)",
       "Bash(sed:*)",
       "Bash(find:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cargo build:*)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check -p sweet_async_tokio)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check -p sweet_async_tokio -- --package=task::adaptive)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check -v)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check)",
+      "Bash(grep:*)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio)"
     ],
     "deny": []
   }

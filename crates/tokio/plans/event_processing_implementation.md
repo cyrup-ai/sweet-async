@@ -17,7 +17,7 @@ Event processing is a core feature of the Sweet Async API, providing a stream-ba
 - `/crates/api/src/task/builder.rs` - ReceiverStrategy and SenderStrategy definitions
 
 **Existing Tokio Implementation:**
-- `/crates/tokio/src/task/tokio_task.rs` - Current TokioTask implementation with no event processing
+- `/crates/tokio/src/task/tokio_task.rs` - Current AsyncTask implementation with no event processing
 
 ## Implementation Tasks
 

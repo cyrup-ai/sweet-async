@@ -15,7 +15,7 @@ The builder pattern is a core component of the Sweet Async API, providing a flue
 - `/crates/api/src/macros/builder.rs` - Macros for builder creation
 
 **Existing Tokio Implementation:**
-- `/crates/tokio/src/task/tokio_task.rs` - Current TokioTask implementation
+- `/crates/tokio/src/task/tokio_task.rs` - Current AsyncTask implementation
 
 ## Implementation Tasks
 
@@ -46,7 +46,7 @@ Create a new file:
 This builder should:
 - Implement the SpawningTaskBuilder trait from the API
 - Handle task creation for future-based workflows
-- Create TokioTask instances when finalized
+- Create AsyncTask instances when finalized
 
 ```markdown
 Key methods to implement:
@@ -89,7 +89,7 @@ Key changes:
 - Ensure orchestrator works with builder-created tasks
 ```
 
-### 5. Implement Static Builder Methods in TokioTask
+### 5. Implement Static Builder Methods in AsyncTask
 
 Update:
 - `/crates/tokio/src/task/tokio_task.rs`
@@ -109,7 +109,7 @@ Create a new file:
 
 ```markdown
 Add convenience functions:
-- `pub fn builder<T: Send + 'static, I: TaskId>() -> TokioTaskBuilder<T, I>`
+- `pub fn builder<T: Send + 'static, I: TaskId>() -> AsyncTaskBuilder<T, I>`
 - `pub fn spawning_builder<T: Send + 'static, I: TaskId>() -> TokioSpawningTaskBuilder<T, I>`
 - `pub fn emitting_builder<T: Send + 'static, I: TaskId>() -> TokioEmittingTaskBuilder<T, I>`
 ```
@@ -131,5 +131,5 @@ Add convenience functions:
 A complete builder implementation that:
 - Fully implements the API traits
 - Maintains the same fluent interface
-- Creates properly configured TokioTask instances
+- Creates properly configured AsyncTask instances
 - Supports both future-based and stream-based workflows

@@ -11,7 +11,22 @@ use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use crate::task::tokio_task::TokioTask;
+use crate::task::async_task::AsyncTask;
+
+/// Safely execute a blocking operation in any context (sync or async)
+pub fn safe_blocking<F, R>(f: F) -> R 
+where
+    F: FnOnce() -> R,
+{
+    // Check if we're in a Tokio context
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // We're in a Tokio context, use block_in_place
+        tokio::task::block_in_place(f)
+    } else {
+        // Not in a Tokio context, call directly
+        f()
+    }
+}
 
 /// Tokio-based implementation of the Runtime trait
 pub struct TokioRuntime {
@@ -71,18 +86,47 @@ impl TokioRuntime {
     pub fn handle(&self) -> &Handle {
         &self.handle
     }
+    
+    /// Safely execute a blocking operation in any context (sync or async)
+    /// 
+    /// This function uses Tokio's block_in_place when in a Tokio context,
+    /// ensuring no deadlocks occur when blocking operations are performed.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust
+    /// // Safe to call from both synchronous and asynchronous contexts
+    /// let count = safe_blocking(|| {
+    ///     runtime.block_on(async {
+    ///         tasks.lock().await.len()
+    ///     })
+    /// });
+    /// ```
+    pub fn safe_blocking<F, R>(f: F) -> R 
+    where
+        F: FnOnce() -> R,
+    {
+        // Check if we're in a Tokio context
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in a Tokio context, use block_in_place
+            tokio::task::block_in_place(f)
+        } else {
+            // Not in a Tokio context, call directly
+            f()
+        }
+    }
 }
 
-impl<T: Send + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
-    type SpawnedTask = TokioTask<T, I>;
+impl<T: Clone + Send + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
+    type SpawnedTask = AsyncTask<T, I>;
 
     fn spawn(
         &self,
         task: impl SpawningTask<T, I> + 'static,
         priority: TaskPriority,
     ) -> Self::SpawnedTask {
-        // Create a new TokioTask with the given task and priority
-        TokioTask::new(task, priority, self.handle.clone(), self.active_tasks.clone())
+        // Create a new AsyncTask with the given task and priority
+        AsyncTask::new(task, priority, self.handle.clone(), self.active_tasks.clone())
     }
 
     fn block_on<F, R>(&self, future: F) -> R

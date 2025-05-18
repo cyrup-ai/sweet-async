@@ -1,6 +1,33 @@
-pub mod tokio_task;
+//! Task module for Tokio implementation of Sweet Async
+//!
+//! This module contains the implementation of the task-related components
+//! for the Tokio runtime, including async tasks, builders, and utility types.
+
+// Core task implementation
+pub mod async_task;
+
+// Task trait implementations
+pub mod cancellable_task;
+pub mod recoverable_task;
+pub mod timed_task;
+pub mod tracing_task;
+pub mod task_context;
+
+// Builder pattern implementation
+pub mod builder;
+
+// Task execution strategies
+pub mod emit;
+pub mod spawn;
+
+// Utility modules
 pub mod adaptive;
 
-pub use tokio_task::TokioTask;
-pub use adaptive::adaptive_stream;
-pub use adaptive::AdaptiveConfig;
+// No re-exports - use the modules directly via their clean interfaces
+
+// Re-export extension traits for additional utilities
+pub use cancellable_task::*;
+pub use recoverable_task::*;
+pub use timed_task::*;
+pub use tracing_task::*;
+pub use task_context::*;

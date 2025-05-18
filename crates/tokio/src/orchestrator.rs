@@ -4,18 +4,17 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use sweet_async_api::orchestra::orchestrator::{OrchestratorError, TaskOrchestrator};
-use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskStatus};
+use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, TaskId, TaskStatus};
 
 use tokio::sync::Mutex;
 
-use crate::runtime::TokioRuntime;
-use crate::task::tokio_task::TokioTask;
-use crate::utils::safe_blocking;
+use crate::runtime::{TokioRuntime, safe_blocking};
+use crate::task::async_task::AsyncTask;
 
 /// Tokio-specific implementation of TaskOrchestrator
-pub struct TokioOrchestrator<T: Send + 'static, I: TaskId> {
+pub struct TokioOrchestrator<T: Clone + Send + 'static, I: TaskId> {
     /// Registry of all tasks managed by this orchestrator
-    tasks: Arc<Mutex<HashMap<I, Arc<TokioTask<T, I>>>>>,
+    tasks: Arc<Mutex<HashMap<I, Arc<AsyncTask<T, I>>>>>,
     /// Task dependencies (dependent_id -> set of dependency_ids)
     dependencies: Arc<Mutex<HashMap<I, HashSet<I>>>>,
     /// Reverse dependencies (dependency_id -> set of dependent_ids)
@@ -26,7 +25,7 @@ pub struct TokioOrchestrator<T: Send + 'static, I: TaskId> {
     runtime: Arc<TokioRuntime>,
 }
 
-impl<T: Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
+impl<T: Clone + Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
     /// Create a new TokioOrchestrator with the given runtime
     pub fn new(runtime: TokioRuntime) -> Self {
         Self {
@@ -36,6 +35,19 @@ impl<T: Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
             groups: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime),
         }
+    }
+    
+    /// Create an orchestrated task with the given runtime and orchestrator
+    /// 
+    /// Note: Currently disabled until the builder pattern is fully implemented
+    #[allow(dead_code)]
+    pub async fn orchestrate<R, F>(runtime: TokioRuntime, f: F) -> Result<R, sweet_async_api::task::AsyncTaskError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+        I: TaskId,
+    {
+        unimplemented!("orchestrate is not yet implemented - will be added in a future PR after the builder pattern is completed")
     }
     
     /// Helper method to check for dependency cycles
@@ -72,14 +84,14 @@ impl<T: Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
     }
 }
 
-impl<T: Send + 'static, I: TaskId> TaskOrchestrator<T, TokioTask<T, I>, I> for TokioOrchestrator<T, I> {
-    type RegisterTaskReturn = Arc<TokioTask<T, I>>;
+impl<T: Clone + Send + 'static, I: TaskId> TaskOrchestrator<T, AsyncTask<T, I>, I> for TokioOrchestrator<T, I> {
+    type RegisterTaskReturn = Arc<AsyncTask<T, I>>;
     type StartTaskFuture = Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send>>;
     type StartAllFuture = Pin<Box<dyn Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send>>;
     type JoinAllFuture = Pin<Box<dyn Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send>>;
     type StartGroupFuture = Pin<Box<dyn Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send>>;
 
-    fn register_task(&self, task: TokioTask<T, I>) -> Self::RegisterTaskReturn {
+    fn register_task(&self, task: AsyncTask<T, I>) -> Self::RegisterTaskReturn {
         let task_arc = Arc::new(task);
         let task_id = task_arc.task_id();
         
@@ -208,7 +220,7 @@ impl<T: Send + 'static, I: TaskId> TaskOrchestrator<T, TokioTask<T, I>, I> for T
             async fn visit<Id: TaskId, T: Send + 'static>(
                 task_id: Id,
                 dependencies: &Mutex<HashMap<Id, HashSet<Id>>>,
-                tasks: &Mutex<HashMap<Id, Arc<TokioTask<T, Id>>>>,
+                tasks: &Mutex<HashMap<Id, Arc<AsyncTask<T, Id>>>>,
                 visited: &mut HashSet<Id>,
                 temp_visited: &mut HashSet<Id>,
                 execution_order: &mut Vec<Id>,
@@ -337,7 +349,8 @@ impl<T: Send + 'static, I: TaskId> TaskOrchestrator<T, TokioTask<T, I>, I> for T
             
             // Wait for all tasks to complete
             for (id, task) in all_tasks {
-                let result = task.clone().into_future().await;
+                // Use Future trait directly to avoid moving task
+                let result = task.await;
                 results.push((id, result));
             }
             

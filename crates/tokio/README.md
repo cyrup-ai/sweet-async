@@ -1,5 +1,7 @@
 # Sweet Async Tokio
 
+![Sweet Async Logo](/assets/sweet_async.png)
+
 This crate provides a Tokio implementation for the Sweet Async library.
 
 ## Features
@@ -8,6 +10,20 @@ This crate provides a Tokio implementation for the Sweet Async library.
 - **Tokio-specific optimizations**: Leverages Tokio's capabilities for efficient task execution
 - **Adaptive concurrency**: Automatically switches between CPU and IO bound workload handling
 - **Structured task orchestration**: Manages task dependencies and lifecycle
+
+## Implementation Status
+
+This crate is currently under active development. See the [implementation plans](plans/README.md) for details on the current status and upcoming work.
+
+- ✅ Basic `AsyncTask` implementation
+- ✅ Basic `TokioRuntime` implementation 
+- ✅ Basic `TokioOrchestrator` implementation
+- ✅ Adaptive concurrency utilities
+- 🚧 Builder pattern implementation (in progress)
+- 🚧 Complete AsyncTask trait implementation (partial)
+- 🚧 Parent-child relationship implementation (stubbed)
+- 🚧 Task chaining (planned)
+- 🚧 Event processing system (planned)
 
 ## Basic Usage
 
@@ -96,6 +112,44 @@ let results = process_adaptive(
 ).await;
 ```
 
+## Upcoming Features
+
+The following features are currently in development:
+
+1. **Builder Pattern**: A fluent, immutable builder pattern for task creation
+   ```rust
+   // Coming soon
+   let task = AsyncTask::to::<String>()
+       .timeout(30.seconds())
+       .run(|| async { "Hello, world!".to_string() })
+       .await?;
+   ```
+
+2. **Event Processing**: Stream-based processing with different strategies
+   ```rust
+   // Coming soon
+   let results = AsyncTask::emits::<UserData>()
+       .sender(SenderStrategy::Parallel { workers: MinMax(1, 4) })
+       .receiver(ReceiverStrategy::Serial { timeout_seconds: 30 })
+       .await_final_event()
+       .await?;
+   ```
+
+3. **Task Chaining**: Functional composition of tasks
+   ```rust
+   // Coming soon
+   let result = task1
+       .chain(|result| process_result(result))
+       .chain(|processed| finalize(processed))
+       .await?;
+   ```
+
+## Contributing
+
+See the [implementation plans](plans/README.md) for guidance on contributing to this crate.
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+![Book](/assets/book.png)
