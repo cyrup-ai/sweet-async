@@ -15,7 +15,7 @@ use sweet_async_api::task::emit::ReceiverEvent;
 use super::event::TokioEventReceiver;
 
 /// Tokio implementation of event collector
-pub struct TokioEventCollector<T: Send + 'static, C: Send + 'static, I: TaskId> {
+pub struct TokioEventCollector<T: Send + 'static, C: Clone + Send + 'static, I: TaskId> {
     /// The aggregated results
     results: Arc<Mutex<Vec<C>>>,
     /// Processing task handle
@@ -24,7 +24,7 @@ pub struct TokioEventCollector<T: Send + 'static, C: Send + 'static, I: TaskId> 
     _marker: PhantomData<(T, I)>,
 }
 
-impl<T: Send + 'static, C: Send + 'static, I: TaskId> TokioEventCollector<T, C, I> {
+impl<T: Send + 'static, C: Clone + Send + 'static, I: TaskId> TokioEventCollector<T, C, I> {
     /// Create a new collector
     pub fn new() -> Self {
         Self {
@@ -222,7 +222,7 @@ impl<T: Send + 'static, C: Send + 'static, I: TaskId> TokioEventCollector<T, C, 
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, I: TaskId> Default for TokioEventCollector<T, C, I> {
+impl<T: Send + 'static, C: Clone + Send + 'static, I: TaskId> Default for TokioEventCollector<T, C, I> {
     fn default() -> Self {
         Self::new()
     }

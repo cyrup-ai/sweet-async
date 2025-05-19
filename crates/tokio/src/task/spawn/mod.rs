@@ -4,5 +4,7 @@
 //! that return results directly.
 
 pub mod builder;
+pub mod result;
 
 pub use builder::TokioSpawningTaskBuilder;
+pub use result::{TokioTaskResult, TokioAsyncResult};

@@ -47,7 +47,7 @@ where
 impl<T, C> FinalEvent<T, C, C> for TokioFinalEvent<T, C>
 where
     T: Send + 'static,
-    C: Send + 'static,
+    C: Clone + Send + 'static,
 {
     fn collected(&self) -> &HashMap<Uuid, C> {
         todo!("Not fully implemented yet")
@@ -62,7 +62,7 @@ where
 impl<T, C> ReceiverEvent<T, C> for TokioFinalEvent<T, C>
 where
     T: Send + 'static,
-    C: Send + 'static,
+    C: Clone + Send + 'static,
 {
     fn event_id(&self) -> &Uuid {
         &self.event_id

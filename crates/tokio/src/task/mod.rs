@@ -6,12 +6,12 @@
 // Core task implementation
 pub mod async_task;
 
-// Task trait implementations
-pub mod cancellable_task;
-pub mod recoverable_task;
-pub mod timed_task;
-pub mod tracing_task;
-pub mod task_context;
+// Task trait implementations - removed to avoid conflicts with async_task implementations
+// pub mod cancellable_task;
+// pub mod recoverable_task;
+// pub mod timed_task;
+// pub mod tracing_task;
+// pub mod task_context;
 
 // Builder pattern implementation
 pub mod builder;
@@ -22,12 +22,13 @@ pub mod spawn;
 
 // Utility modules
 pub mod adaptive;
+pub mod work_wrapper;
 
 // No re-exports - use the modules directly via their clean interfaces
 
-// Re-export extension traits for additional utilities
-pub use cancellable_task::*;
-pub use recoverable_task::*;
-pub use timed_task::*;
-pub use tracing_task::*;
-pub use task_context::*;
+// Re-export extension traits for additional utilities - removed to avoid conflicts
+// pub use cancellable_task::*;
+// pub use recoverable_task::*;
+// pub use timed_task::*;
+// pub use tracing_task::*;
+// pub use task_context::*;

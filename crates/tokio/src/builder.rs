@@ -10,6 +10,7 @@ use sweet_async_api::task::TaskId;
 use sweet_async_api::task::AsyncTaskError;
 use sweet_async_api::task::AsyncTask;
 use sweet_async_api::orchestra::OrchestratorBuilder;
+use sweet_async_api::orchestra::orchestrator::TaskOrchestrator;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -127,7 +128,7 @@ where
 {
     type Next = Self; // Return self to allow chaining
     
-    fn orchestrator<O: sweet_async_api::orchestra::TaskOrchestrator<T, Task, I>>(
+    fn orchestrator<O: TaskOrchestrator<T, Task, I>>(
         self,
         _orchestrator: &O,
     ) -> Self::Next {

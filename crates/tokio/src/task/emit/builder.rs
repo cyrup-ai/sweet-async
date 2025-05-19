@@ -5,12 +5,12 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
 use tokio::runtime::Handle;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -177,13 +177,16 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
 impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
     ApiSenderBuilder<T, C, E, I> for TokioSenderBuilder<T, C, E, I> 
 {
-    type ReceiverBuilder = TokioReceiverBuilder<T, C, E, I>;
+    type Receiver = TokioReceiverBuilder<T, C, E, I>;
 
-    fn receiver(
+    fn receiver<F>(
         self,
+        receiver: F,
         strategy: ReceiverStrategy,
-        receiver: fn(&T, &mut (), Uuid) -> C,
-    ) -> Self::ReceiverBuilder {
+    ) -> Self::Receiver
+    where
+        F: AsyncWork<C> + Send + 'static,
+    {
         TokioReceiverBuilder::new(
             self.base_builder,
             self.runtime,
@@ -191,7 +194,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
             self.priority,
             self.sender_work,
             self.sender_strategy,
-            receiver,
+            Box::new(receiver),
             strategy,
         )
     }
@@ -212,7 +215,7 @@ pub struct TokioReceiverBuilder<T: Send + 'static, C: Send + 'static, E: Send + 
     /// Sender strategy
     sender_strategy: SenderStrategy,
     /// Event receiver work function
-    receiver_work: fn(&T, &mut (), Uuid) -> C,
+    receiver_work: Box<dyn AsyncWork<C> + Send + 'static>,
     /// Receiver strategy
     receiver_strategy: ReceiverStrategy,
     /// Type markers
@@ -223,16 +226,19 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     TokioReceiverBuilder<T, C, E, I> 
 {
     /// Create a new receiver builder
-    pub fn new(
+    pub fn new<F>(
         base_builder: TokioAsyncTaskBuilder<T, I>,
         runtime: Handle,
         active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
         priority: TaskPriority,
         sender_work: Box<dyn AsyncWork<T> + Send + 'static>,
         sender_strategy: SenderStrategy,
-        receiver_work: fn(&T, &mut (), Uuid) -> C,
+        receiver_work: F,
         receiver_strategy: ReceiverStrategy,
-    ) -> Self {
+    ) -> Self 
+    where
+        F: AsyncWork<C> + Send + 'static,
+    {
         Self {
             base_builder,
             runtime,
@@ -240,7 +246,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
             priority,
             sender_work,
             sender_strategy,
-            receiver_work,
+            receiver_work: Box::new(receiver_work),
             receiver_strategy,
             _marker: PhantomData,
         }
@@ -265,11 +271,13 @@ pub struct TokioEmittingTask<T: Send + 'static, C: Send + 'static, E: Send + 'st
     cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     /// Final result from task completion
     final_result: Arc<Mutex<Option<Result<Vec<C>, AsyncTaskError>>>>,
+    /// Task metrics
+    metrics: crate::task::async_task::TaskMetrics,
     /// Type markers
     _marker: PhantomData<E>,
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
     TokioEmittingTask<T, C, E, I> 
 {
     /// Create a new emitting task
@@ -386,13 +394,14 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
             collector,
             cancel_tx: Arc::new(Mutex::new(Some(cancel_tx))),
             final_result,
+            metrics: crate::task::async_task::TaskMetrics::new(),
             _marker: PhantomData,
         }
     }
 }
 
 // Implement core AsyncTask methods first (these are required by EmittingTask trait)
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
     AsyncTask<T, I> for TokioEmittingTask<T, C, E, I>
 {
     fn to<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
@@ -410,7 +419,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     EmittingTask<T, C, E, I> for TokioEmittingTask<T, C, E, I>
 {
     // FinalEvent will be implemented in a follow-up PR
@@ -443,7 +452,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
 }
 
 // Implement all required AsyncTask supertraits
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::PrioritizedTask<T> for TokioEmittingTask<T, C, E, I>
 {
     fn priority(&self) -> &impl sweet_async_api::task::RankableByPriority {
@@ -451,7 +460,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::CancellableTask<T> for TokioEmittingTask<T, C, E, I>
 {
     async fn cancel(&self, level: sweet_async_api::task::CancellationLevel) -> Result<(), sweet_async_api::orchestra::OrchestratorError> {
@@ -477,14 +486,14 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     
     fn on_cancel<F, Fut>(&self, callback: F)
     where
-        F: FnOnce() -> Fut + Send + 'static,
+        F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         // TODO: Implement callback registration
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::TracingTask<T> for TokioEmittingTask<T, C, E, I>
 {
     fn handle_error(&self, error: sweet_async_api::task::AsyncTaskError) -> Result<T, sweet_async_api::task::AsyncTaskError> {
@@ -502,7 +511,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::TimedTask<T> for TokioEmittingTask<T, C, E, I>
 {
     fn created_timestamp(&self) -> std::time::SystemTime {
@@ -526,7 +535,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::ContextualizedTask<T, I> for TokioEmittingTask<T, C, E, I>
 {
     type RuntimeType = crate::runtime::TokioRuntime;
@@ -552,7 +561,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::StatusEnabledTask<T> for TokioEmittingTask<T, C, E, I>
 {
     fn status(&self) -> sweet_async_api::task::TaskStatus {
@@ -565,7 +574,7 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::RecoverableTask<T> for TokioEmittingTask<T, C, E, I>
 {
     fn recover(&self, error: sweet_async_api::task::AsyncTaskError) -> Result<T, sweet_async_api::task::AsyncTaskError> {
@@ -584,27 +593,27 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::MetricsEnabledTask<T> for TokioEmittingTask<T, C, E, I>
 {
-    type Cpu = ();
-    type Memory = ();
-    type Io = ();
+    type Cpu = crate::task::async_task::TaskMetrics;
+    type Memory = crate::task::async_task::TaskMetrics;
+    type Io = crate::task::async_task::TaskMetrics;
     
     fn cpu_usage(&self) -> &Self::Cpu {
-        &()
+        &self.metrics
     }
     
     fn memory_usage(&self) -> &Self::Memory {
-        &()
+        &self.metrics
     }
     
     fn io_usage(&self) -> &Self::Io {
-        &()
+        &self.metrics
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> 
+impl<T: Send + 'static, C: Send + 'static, E: Send + Sync + 'static, I: TaskId> 
     ApiReceiverBuilder<T, C, E, I> for TokioReceiverBuilder<T, C, E, I> 
 {
     type Task = TokioEmittingTask<T, C, E, I>;
@@ -633,23 +642,4 @@ impl<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>
         )
     }
     
-    fn await_result(
-        self,
-    ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send {
-        async move {
-            let task = self.start_queue();
-            
-            // TODO: Implement proper await_completion method
-            let final_event = crate::task::emit::TokioFinalEvent::<T, C>::new(
-                todo!("Provide data"), 
-                Vec::new()
-            );
-            
-            // For simplicity, we're using a dummy value for C
-            // In a real implementation, this would come from the task execution  
-            let default_c = todo!("Implement proper collection processing");
-            
-            (default_c, final_event)
-        }
-    }
 }

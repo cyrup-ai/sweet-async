@@ -12,7 +12,7 @@ use crate::runtime::{TokioRuntime, safe_blocking};
 use crate::task::async_task::AsyncTask;
 
 /// Tokio-specific implementation of TaskOrchestrator
-pub struct TokioOrchestrator<T: Clone + Send + 'static, I: TaskId> {
+pub struct TokioOrchestrator<T: Clone + Send + 'static, I: TaskId + std::hash::Hash + Eq> {
     /// Registry of all tasks managed by this orchestrator
     tasks: Arc<Mutex<HashMap<I, Arc<AsyncTask<T, I>>>>>,
     /// Task dependencies (dependent_id -> set of dependency_ids)
@@ -25,7 +25,7 @@ pub struct TokioOrchestrator<T: Clone + Send + 'static, I: TaskId> {
     runtime: Arc<TokioRuntime>,
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
+impl<T: Clone + Send + 'static, I: TaskId + std::hash::Hash + Eq> TokioOrchestrator<T, I> {
     /// Create a new TokioOrchestrator with the given runtime
     pub fn new(runtime: TokioRuntime) -> Self {
         Self {
@@ -53,30 +53,32 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
     /// Helper method to check for dependency cycles
     async fn has_dependency_cycle(&self, dependent_id: &I, dependency_id: &I) -> bool {
         // Helper function to check if target is in the dependency chain of start
-        async fn is_in_dependency_chain<Id: TaskId>(
-            dependencies: &Mutex<HashMap<Id, HashSet<Id>>>,
-            start: &Id,
-            target: &Id,
-            visited: &mut HashSet<Id>,
-        ) -> bool {
-            if start == target {
-                return true;
-            }
-            
-            if !visited.insert(*start) {
-                return false; // Already visited
-            }
-            
-            let deps = dependencies.lock().await;
-            if let Some(direct_deps) = deps.get(start) {
-                for dep in direct_deps {
-                    if is_in_dependency_chain(dependencies, dep, target, visited).await {
-                        return true;
+        fn is_in_dependency_chain<'a, Id: TaskId + Eq + std::hash::Hash>(
+            dependencies: &'a Mutex<HashMap<Id, HashSet<Id>>>,
+            start: &'a Id,
+            target: &'a Id,
+            visited: &'a mut HashSet<Id>,
+        ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+            Box::pin(async move {
+                if start == target {
+                    return true;
+                }
+                
+                if !visited.insert(*start) {
+                    return false; // Already visited
+                }
+                
+                let deps = dependencies.lock().await;
+                if let Some(direct_deps) = deps.get(start) {
+                    for dep in direct_deps {
+                        if is_in_dependency_chain(dependencies, dep, target, visited).await {
+                            return true;
+                        }
                     }
                 }
-            }
-            
-            false
+                
+                false
+            })
         }
         
         let mut visited = HashSet::new();
@@ -84,7 +86,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioOrchestrator<T, I> {
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> TaskOrchestrator<T, AsyncTask<T, I>, I> for TokioOrchestrator<T, I> {
+impl<T: Clone + Send + 'static, I: TaskId + std::hash::Hash + Eq> TaskOrchestrator<T, AsyncTask<T, I>, I> for TokioOrchestrator<T, I> {
     type RegisterTaskReturn = Arc<AsyncTask<T, I>>;
     type StartTaskFuture = Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send>>;
     type StartAllFuture = Pin<Box<dyn Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send>>;
@@ -217,7 +219,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TaskOrchestrator<T, AsyncTask<T, I>, 
             let mut visited = HashSet::new();
             let mut temp_visited = HashSet::new();
             
-            async fn visit<Id: TaskId, T: Send + 'static>(
+            async fn visit<Id: TaskId + Eq + std::hash::Hash, T: Clone + Send + 'static>(
                 task_id: Id,
                 dependencies: &Mutex<HashMap<Id, HashSet<Id>>>,
                 tasks: &Mutex<HashMap<Id, Arc<AsyncTask<T, Id>>>>,
@@ -394,6 +396,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TaskOrchestrator<T, AsyncTask<T, I>, 
     fn start_group(&self, group_name: &str) -> Self::StartGroupFuture {
         let groups = self.groups.clone();
         let tasks = self.tasks.clone();
+        let group_name = group_name.to_owned();
         
         Box::pin(async move {
             let mut results = Vec::new();

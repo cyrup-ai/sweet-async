@@ -13,7 +13,7 @@ use sweet_async_api::task::{
     TaskStatus, TimedTask, TracingTask
 };
 // use sweet_async_api::task::builder::AsyncWork;
-use sweet_async_api::task::spawn::{SpawningTask, TaskResult};
+use sweet_async_api::task::spawn::SpawningTask;
 
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -24,7 +24,7 @@ use crate::runtime::safe_blocking;
 
 /// Task metrics implementation for Tokio tasks
 #[derive(Debug)]
-struct TaskMetrics {
+pub struct TaskMetrics {
     cpu_time: Arc<Mutex<Duration>>,
     memory_current: Arc<Mutex<u64>>,
     memory_peak: Arc<Mutex<u64>>,
@@ -33,7 +33,7 @@ struct TaskMetrics {
 }
 
 impl TaskMetrics {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             cpu_time: Arc::new(Mutex::new(Duration::from_secs(0))),
             memory_current: Arc::new(Mutex::new(0)),
@@ -102,6 +102,17 @@ impl CpuUsage for TaskMetrics {
         // This is a placeholder implementation
         0.5
     }
+
+    fn user_time(&self) -> Duration {
+        // Precise user/system split not available; return total cpu_time as
+        // user_time for now.
+        self.cpu_time()
+    }
+
+    fn system_time(&self) -> Duration {
+        // Without kernel vs user accounting, report zero system time.
+        Duration::from_secs(0)
+    }
 }
 
 impl MemoryUsage for TaskMetrics {
@@ -120,6 +131,16 @@ impl MemoryUsage for TaskMetrics {
             })
         })
     }
+
+    fn allocation_count(&self) -> u64 {
+        // Allocation tracking not yet instrumented – return 0.
+        0
+    }
+
+    fn allocation_rate(&self) -> f64 {
+        // Without allocation timestamps we cannot compute rate – return 0.0.
+        0.0
+    }
 }
 
 impl IoUsage for TaskMetrics {
@@ -137,6 +158,30 @@ impl IoUsage for TaskMetrics {
                 *self.bytes_written.lock().await
             })
         })
+    }
+
+    fn read_operations(&self) -> u64 {
+        0
+    }
+
+    fn write_operations(&self) -> u64 {
+        0
+    }
+
+    fn read_latency(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+
+    fn write_latency(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+
+    fn operations_per_second(&self) -> f64 {
+        0.0
+    }
+
+    fn io_wait_time(&self) -> Duration {
+        Duration::from_secs(0)
     }
 }
 
@@ -713,13 +758,25 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
     
     fn on_cancel<F, Fut>(&self, callback: F)
     where
-        F: FnOnce() -> Fut + Send + 'static,
+        F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
         futures::executor::block_on(async {
             let mut callbacks = self.cancel_callbacks.lock().await;
-            callbacks.push(Box::new(move || Box::pin(callback())));
+            callbacks.push(Box::new(move || Box::pin(callback.run())));
         });
+    }
+    
+    async fn cancel_gracefully(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::Graceful).await
+    }
+    
+    async fn cancel_forcefully(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::Kill).await
+    }
+    
+    async fn cancel_immediately(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::KillHard).await
     }
 }
 
@@ -871,20 +928,48 @@ impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I> for AsyncTask<T, I> {
-    type TaskResult = Result<T, AsyncTaskError>;
+// Allow Arc<AsyncTask> to be awaited using IntoFuture
+impl<T: Clone + Send + 'static, I: TaskId> IntoFuture for Arc<AsyncTask<T, I>> {
+    type Output = Result<T, AsyncTaskError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+    
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            // Wait for the task result
+            loop {
+                let result = self.result.lock().unwrap();
+                if let Some(result) = result.clone() {
+                    return result;
+                }
+                // In a real implementation, we'd wait on a notification
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+    }
+}
+
+impl<T: Clone + Send + 'static + std::fmt::Debug, I: TaskId + std::fmt::Debug> SpawningTask<T, I> for AsyncTask<T, I> {
+    type TaskResult = crate::task::spawn::TokioTaskResult<T>;
     type OutputFuture = Pin<Box<dyn Future<Output = Self::TaskResult> + Send>>;
     type JoinChildrenFuture = Pin<Box<dyn Future<Output = Self::JoinChildrenResult> + Send + 'static>>;
-    type JoinChildrenResult = Result<Vec<I>, AsyncTaskError>;
-    type AsyncWork = Box<dyn Fn() -> T + Send + 'static>;
+    type JoinChildrenResult = crate::task::spawn::TokioAsyncResult<Vec<I>>;
+    type AsyncWork = crate::task::work_wrapper::DynAsyncWork<T>;
     
     fn task_id(&self) -> I {
         self.id
     }
 
-    fn run(self, _work: Self::AsyncWork) -> Self {
-        // Implementation would execute the work
-        // This is a simplification - to be properly implemented in future PRs
+    fn run(self, work: Self::AsyncWork) -> Self {
+        // Execute work in a blocking manner for now
+        let result = futures::executor::block_on(async move {
+            work.run().await
+        });
+        
+        {
+            let mut task_result = self.result.lock().unwrap();
+            *task_result = Some(Ok(result));
+        }
+        
         self
     }
 
@@ -895,18 +980,22 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I> for AsyncTask<T, I
     {
         // Implementation would create and execute a child task
         // This is a placeholder implementation
-        Box::pin(async { Err(AsyncTaskError::Failure("Not implemented yet".to_string())) })
+        Box::pin(async move { 
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        })
     }
 
     fn join_children(&self) -> Self::JoinChildrenFuture {
         // Implementation would wait for all child tasks to complete
         // This is a placeholder implementation
-        Box::pin(async { Err(AsyncTaskError::Failure("Not implemented yet".to_string())) })
+        Box::pin(async move { 
+            crate::task::spawn::TokioAsyncResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        })
     }
 
     fn value(&self) -> Option<&T> {
-        // Implementation would return the current value if available
-        None
+        let result = self.result.lock().unwrap();
+        result.as_ref().and_then(|r| r.as_ref().ok())
     }
 
     fn chain<U, F>(self, _f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
@@ -917,6 +1006,8 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I> for AsyncTask<T, I
     {
         // Implementation would chain the next operation
         // This is a placeholder implementation
-        Box::pin(async { Err(AsyncTaskError::Failure("Not implemented yet".to_string())) })
+        Box::pin(async move { 
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        })
     }
 }

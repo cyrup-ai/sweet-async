@@ -125,8 +125,8 @@ impl<T: Clone + Send + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
         task: impl SpawningTask<T, I> + 'static,
         priority: TaskPriority,
     ) -> Self::SpawnedTask {
-        // Create a new AsyncTask with the given task and priority
-        AsyncTask::new(task, priority, self.handle.clone(), self.active_tasks.clone())
+        // Create a new AsyncTask from the spawning task
+        AsyncTask::from_spawning_task(task, priority, self.handle.clone(), self.active_tasks.clone())
     }
 
     fn block_on<F, R>(&self, future: F) -> R
