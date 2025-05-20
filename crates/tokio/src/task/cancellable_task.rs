@@ -14,7 +14,7 @@ use sweet_async_api::task::builder::AsyncWork;
 use crate::task::async_task::AsyncTask;
 
 impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I> {
-    /// Cancel the task with the specified cancellation level
+    /// Cancel the task with andthe specified cancellation level
     fn cancel(
         &self,
         level: CancellationLevel,

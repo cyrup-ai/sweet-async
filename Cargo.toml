@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/api", "crates/sweet_async"]
+members = ["crates/api", "crates/tokio", "crates/sweet_async"]
 resolver = "3"
 [workspace.metadata]
 authors = ["David Maple <david@cyrup.ai>"]

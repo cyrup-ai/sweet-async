@@ -928,25 +928,6 @@ impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I
     }
 }
 
-// Allow Arc<AsyncTask> to be awaited using IntoFuture
-impl<T: Clone + Send + 'static, I: TaskId> IntoFuture for Arc<AsyncTask<T, I>> {
-    type Output = Result<T, AsyncTaskError>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
-    
-    fn into_future(self) -> Self::IntoFuture {
-        Box::pin(async move {
-            // Wait for the task result
-            loop {
-                let result = self.result.lock().unwrap();
-                if let Some(result) = result.clone() {
-                    return result;
-                }
-                // In a real implementation, we'd wait on a notification
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-    }
-}
 
 impl<T: Clone + Send + 'static + std::fmt::Debug, I: TaskId + std::fmt::Debug> SpawningTask<T, I> for AsyncTask<T, I> {
     type TaskResult = crate::task::spawn::TokioTaskResult<T>;

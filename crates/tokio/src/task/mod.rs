@@ -26,6 +26,9 @@ pub mod work_wrapper;
 
 // No re-exports - use the modules directly via their clean interfaces
 
+// Re-export the main AsyncTask type for convenient access
+pub use async_task::AsyncTask;
+
 // Re-export extension traits for additional utilities - removed to avoid conflicts
 // pub use cancellable_task::*;
 // pub use recoverable_task::*;

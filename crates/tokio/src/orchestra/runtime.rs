@@ -40,6 +40,18 @@ pub struct TokioRuntime {
     config: TokioRuntimeConfig,
 }
 
+// Safe to clone – underlying Handle and Arcs are cloneable.
+impl Clone for TokioRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            handle: self.handle.clone(),
+            active_tasks: self.active_tasks.clone(),
+            running: self.running.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
 /// Configuration for the Tokio runtime
 #[derive(Debug, Clone)]
 pub struct TokioRuntimeConfig {

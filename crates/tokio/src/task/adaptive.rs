@@ -171,29 +171,29 @@ impl<T: Send + 'static> EngineTask<T> {
 // =============== Stats & Adaptation ===============
 
 struct AdaptixStats {
-    // We measure "chunk tasks" durations
     task_durations: Vec<Duration>,
     last_adapt: Instant,
-    current_workers: usize,
+    current_workers: usize, // Target number of workers
     workload_type: WorkloadType,
     engine: ConcurrencyEngine,
     chunk_size: usize,
+    concurrency_sema: Arc<Semaphore>, // Moved Semaphore here
 }
 
 impl AdaptixStats {
-    fn new() -> Self {
+    fn new(initial_workers: usize, initial_chunk_size: usize) -> Self { // Accept initial config
         let cpus = num_cpus::get().max(1);
         Self {
             task_durations: Vec::new(),
             last_adapt: Instant::now(),
-            current_workers: cpus, // start guess
-            workload_type: WorkloadType::Mixed,
-            engine: ConcurrencyEngine::new_tokio(), // start guess
-            chunk_size: 16,                         // start guess
+            current_workers: initial_workers.max(1),
+            workload_type: WorkloadType::Mixed, // Start with mixed
+            engine: ConcurrencyEngine::new_tokio(), // Default to Tokio engine
+            chunk_size: initial_chunk_size.max(1),
+            concurrency_sema: Arc::new(Semaphore::new(initial_workers.max(1))),
         }
     }
 
-    /// Clone the concurrency engine (Arc if needed).
     fn engine_clone(&self) -> ConcurrencyEngine {
         match &self.engine {
             ConcurrencyEngine::Rayon { pool } => ConcurrencyEngine::Rayon {
@@ -201,6 +201,15 @@ impl AdaptixStats {
             },
             ConcurrencyEngine::Tokio => ConcurrencyEngine::Tokio,
         }
+    }
+
+    // Method to update the semaphore when current_workers changes
+    fn update_semaphore(&mut self) {
+        // Create a new semaphore with the updated number of workers.
+        // Existing tasks holding permits from the old semaphore will complete normally.
+        // New tasks will acquire permits from this new semaphore.
+        self.concurrency_sema = Arc::new(Semaphore::new(self.current_workers.max(1)));
+        debug!("Semaphore updated to {} permits", self.current_workers);
     }
 }
 
@@ -212,10 +221,7 @@ fn adapt_concurrency(st: &mut AdaptixStats, cfg: &AdaptixConfig) {
     if count == 0 {
         return;
     }
-
     let avg = total / (count as u32);
-
-    // Count how many chunk tasks exceeded the "IO threshold"
     let io_like = st
         .task_durations
         .iter()
@@ -232,34 +238,32 @@ fn adapt_concurrency(st: &mut AdaptixStats, cfg: &AdaptixConfig) {
     };
     st.workload_type = new_type;
 
-    // Decide concurrency + engine + chunk size
     let cpus = num_cpus::get().max(1);
+    let prev_workers = st.current_workers;
     match new_type {
         WorkloadType::CpuBound => {
-            // Switch to Rayon
             st.engine = ConcurrencyEngine::new_rayon(cpus);
             st.current_workers = cpus.clamp(cfg.min_workers, cfg.max_workers);
             st.chunk_size = cfg.cpu_chunk_size;
         }
         WorkloadType::IoBound => {
-            // Switch to Tokio
             st.engine = ConcurrencyEngine::new_tokio();
-            let desired = (cpus * 2).clamp(cfg.min_workers, cfg.max_workers);
-            st.current_workers = desired;
+            st.current_workers = (cpus * 2).clamp(cfg.min_workers, cfg.max_workers);
             st.chunk_size = cfg.io_chunk_size;
         }
         WorkloadType::Mixed => {
-            // Use Tokio for "mixed"
             st.engine = ConcurrencyEngine::new_tokio();
-            let desired = ((cpus * 3) / 2).clamp(cfg.min_workers, cfg.max_workers);
-            st.current_workers = desired;
+            st.current_workers = ((cpus * 3) / 2).clamp(cfg.min_workers, cfg.max_workers);
             st.chunk_size = cfg.mixed_chunk_size;
         }
     }
 
+    if st.current_workers != prev_workers {
+        st.update_semaphore(); // Update semaphore if worker count changed
+    }
+
     st.task_durations.clear();
     st.last_adapt = Instant::now();
-
     debug!(
         "Adapt concurrency -> new_mode={:?}, chunk_size={}, concurrency={}, avg_chunk_time={:?}",
         new_type, st.chunk_size, st.current_workers, avg
@@ -309,7 +313,7 @@ where
     //   5) Measures time, updates stats, possibly calls adapt_concurrency
 
     tokio::spawn(async move {
-        let mut stats = AdaptixStats::new();
+        let mut stats = AdaptixStats::new(config.max_workers, config.cpu_chunk_size);
         let concurrency_sema = Arc::new(Semaphore::new(stats.current_workers));
 
         // We store items in a local Vec until we reach chunk_size, then spawn a job.
@@ -433,6 +437,125 @@ where
 
     // The aggregator runs in the background. We return a `ReceiverStream`
     // that yields all the items the aggregator produces.
+    ReceiverStream::new(rx_out)
+}
+
+// =============== NEW: Async Stream Adaptive Processing ===============
+
+/// DSL inputs for building an adaptive stream from an ASYNC input stream.
+pub struct AdaptixAsyncDsl<S, F> {
+    pub config: AdaptixConfig,
+    pub input_stream: S, // S is an async Stream
+    pub map_fn: F,       // map_fn is still sync Fn(&Item) -> Out
+}
+
+/// Build an adaptive chunked stream from an ASYNC input stream.
+/// The returned `impl Stream<Item=Out>` yields items.
+/// Order depends on chunk completion; this version forwards results as they complete.
+pub fn build_adaptive_async_stream<S, Item, MapFn, Out>(
+    dsl: AdaptixAsyncDsl<S, MapFn>,
+) -> impl Stream<Item = Out>
+where
+    S: Stream<Item = Item> + Unpin + Send + 'static,
+    Item: Send + Sync + 'static,
+    MapFn: Fn(&Item) -> Out + Send + Sync + 'static,
+    Out: Send + 'static,
+{
+    let AdaptixAsyncDsl {
+        config,
+        mut input_stream,
+        map_fn,
+    } = dsl;
+
+    let (tx_out, rx_out) = mpsc::channel::<Out>(config.max_workers.saturating_mul(2));
+    let map_fn_arc = Arc::new(map_fn);
+
+    tokio::spawn(async move {
+        let mut stats = AdaptixStats::new(config.max_workers, config.cpu_chunk_size);
+        let concurrency_sema = Arc::new(Semaphore::new(stats.current_workers.max(1)));
+
+        let mut chunk_buf = Vec::with_capacity(stats.chunk_size);
+
+        let spawn_chunk_job = |chunk: Vec<Item>, st: &AdaptixStats, map_fn_cloned: Arc<MapFn>| {
+            if chunk.is_empty() {
+                return None;
+            }
+            let permit_sema = st.concurrency_sema.clone();
+            let engine = st.engine_clone();
+            let start_time = Instant::now();
+            let cpu_bound_hint = matches!(st.workload_type, WorkloadType::CpuBound);
+            let chunk_processing_task = engine.spawn_chunk(chunk, map_fn_cloned, cpu_bound_hint);
+            let join_handle = tokio::spawn(async move {
+                let _permit = permit_sema.acquire_owned().await.expect("Semaphore closed unexpectedly during acquire");
+                let outputs = match chunk_processing_task.wait() {
+                    Ok(o) => o,
+                    Err(e) => {
+                        warn!("Adaptive async stream: Chunk job failed: {}", e);
+                        Vec::new()
+                    }
+                };
+                (outputs, start_time.elapsed())
+            });
+            Some(join_handle)
+        };
+
+        let mut in_flight_chunk_futures = Vec::new();
+
+        loop {
+            let mut item_received_in_batch = false;
+            while chunk_buf.len() < stats.chunk_size {
+                match input_stream.next().await {
+                    Some(item) => {
+                        chunk_buf.push(item);
+                        item_received_in_batch = true;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+
+            if !chunk_buf.is_empty() {
+                let current_chunk_to_process = std::mem::replace(&mut chunk_buf, Vec::with_capacity(stats.chunk_size));
+                if let Some(fut) = spawn_chunk_job(
+                    current_chunk_to_process, 
+                    &stats,
+                    map_fn_arc.clone(), 
+                ) {
+                    in_flight_chunk_futures.push(fut);
+                }
+            }
+
+            if !item_received_in_batch && chunk_buf.is_empty() {
+                break;
+            }
+        }
+
+        for chunk_future_handle in in_flight_chunk_futures {
+            match chunk_future_handle.await {
+                Ok((outputs, duration)) => {
+                    stats.task_durations.push(duration);
+                    for out_item in outputs {
+                        if tx_out.send(out_item).await.is_err() {
+                            warn!("Adaptive async stream: Output channel closed.");
+                            drop(tx_out);
+                            return;
+                        }
+                    }
+                    if stats.task_durations.len() >= config.sample_size &&
+                       stats.last_adapt.elapsed().as_millis() as u64 >= config.adapt_interval_ms
+                    {
+                        adapt_concurrency(&mut stats, &config);
+                    }
+                }
+                Err(join_error) => {
+                    warn!("Adaptive async stream: Chunk future join error: {}", join_error);
+                }
+            }
+        }
+        drop(tx_out);
+    });
+
     ReceiverStream::new(rx_out)
 }
 
