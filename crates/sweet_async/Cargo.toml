@@ -4,12 +4,27 @@ version = "0.1.0"
 edition = "2024"
 # publish = true
 
-# Features
-tokio = ["dep:sweet_async_tokio", "dep:tokio"]
-default = ["tokio"]
-# std = ["dep:sweet_async_std"] # For future
 
 [dependencies]
 sweet_async_api = { path = "../api" }
 sweet_async_tokio = { path = "../tokio", optional = true }
 tokio = { workspace = true, optional = true }
+clap = { workspace = true, features = ["derive"] }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+
+# Features
+[features]
+tokio = ["dep:sweet_async_tokio", "dep:tokio"]
+default = ["tokio"]
+# std = ["dep:sweet_async_std"] # For future
+
+# executable cli
+[[bin]]
+name = "async"
+path = "src/main.rs"
+
+# library
+[lib]
+name = "sweet_async"
+path = "src/lib.rs"

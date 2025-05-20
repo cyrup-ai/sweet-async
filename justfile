@@ -3,15 +3,24 @@ default:
     @just --list
 
 doc:
-    cd crates/sweet_async && cargo rustdoc -Z unstable-options --output-format json && cd ../..
+    cargo doc --workspace --all-features --no-deps --message-format short --quiet
 
 build:
     cargo fmt --all --message-format short --quiet
-    cargo build --release --message-format short --quiet
+    cargo build --release --manifest-path crates/sweet_async/Cargo.toml --message-format short --quiet
+
+clean:
+    cargo clean --workspace
+
+upgrade:
+    cargo workspaces exec -- rm -f Cargo.lock
+    cargo upgrade
+    rm -f Cargo.lock
+    cargo upgrade --incompatible
 
 run:
-    cargo fmt --all --message-format short --quiet
-    cargo run --message-format short --quiet
+    cargo build --release --features tokio --manifest-path crates/sweet_async/Cargo.toml
+    ./crates/sweet_async/target/release/async
 
 check:
     cargo fmt --all --message-format short --quiet -- --check
@@ -23,7 +32,8 @@ test:
     cargo nextest run --message-format short --quiet
 
 install:
-    cargo install --path . 
+    cargo install --path crates/sweet_async
+
 
 # ───────────────────────── Documentation ─────────────────────────
 
