@@ -34,6 +34,7 @@ num_cpus = { workspace = true }
 rayon = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 rand = { workspace = true }
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
@@ -42,7 +43,3 @@ cargo-nextest = { workspace = true }
 [lib]
 name = "sweet_async_tokio"
 path = "src/lib.rs"
-
-[[example]]
-name = "tokio_examples"
-path = "examples/tokio_examples.rs"

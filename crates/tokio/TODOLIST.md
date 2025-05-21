@@ -66,6 +66,38 @@ This is a comprehensive list of all remaining items required for a robust, produ
 
 ---
 
+### `task/cancellable_task.rs`
+- [ ] Refactor all usages of `futures::executor::block_on` to use `safe_blocking` or a fully async approach. No blocking in async context allowed.
+- [ ] Ensure all trait methods are fully async-compatible and do not risk deadlocks.
+
+---
+
+### `task/emit/task.rs`
+- [ ] Refactor all usages of `futures::executor::block_on` to use `safe_blocking` or a fully async approach. No blocking in async context allowed.
+- [ ] Ensure all trait methods are fully async-compatible and do not risk deadlocks.
+
+---
+
+### `task/emit/builder.rs`
+- [ ] Implement TODOs for recovery and fallback logic in emitting task builder.
+
+---
+
+### `task/async_task.rs`
+- [ ] Implement `run_child`, `join_children`, and `chain` logic for child task management. Replace placeholder/`Not implemented yet` errors with real implementations.
+
+---
+
+### `task/spawn/result.rs`
+- [ ] Implement `and_then`, `or_else`, and `map` logic for async task result chaining. Replace TODO errors with real implementations.
+
+---
+
+### `task/spawn/task.rs`
+- [ ] Implement `spawn` and `spawn_with_timeout` methods for `AsyncTask`. Replace `unimplemented!` with real implementations.
+
+---
+
 **If you add or change a feature, update this list!**
 
 ---

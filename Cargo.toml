@@ -29,4 +29,5 @@ clap = { version = "4.5", features = ["derive"] }
 sweet_async = { path = "crates/sweet_async" }
 sweet_async_api = { path = "crates/api" }
 sweet_async_tokio = { path = "crates/tokio" }
+tokio-util = { version = "0.7.15", features = ["full"] }
 # sweet_async_async_std = { path = "crates/async-std" } # Uncomment when async-std variant is added

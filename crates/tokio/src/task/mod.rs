@@ -22,7 +22,6 @@ pub mod spawn;
 
 // Utility modules
 pub mod adaptive;
-pub mod work_wrapper;
 
 // No re-exports - use the modules directly via their clean interfaces
 

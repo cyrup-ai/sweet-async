@@ -74,7 +74,7 @@ pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>
     TokioSpawningTaskBuilder::<T, E, I>::new(runtime, active_tasks)
 }
 
-/// Orchestrator builder wrapper that can forward method calls
+/// Orchestrator builder that can forward method calls
 pub enum DefaultOrchestratorBuilder<T, Task, I>
 where
     T: Send + 'static,

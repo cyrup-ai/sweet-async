@@ -6,9 +6,9 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use futures::{Sink, Stream, Future};
-use tokio::sync::mpsc::{Receiver, Sender};
+use futures::{Future, Sink, Stream};
 use sweet_async_api::task::emit::ReceiverEvent;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 /// Tokio implementation of event sender
 pub struct TokioEventSender<T: Send + 'static> {
@@ -77,7 +77,7 @@ impl<T: Send + 'static> Stream for TokioEventReceiver<T> {
     }
 }
 
-// Basic event wrapper for the Tokio implementation
+// Basic event type for the Tokio implementation
 #[derive(Debug, Clone)]
 pub struct TokioEvent<T, C>
 where
@@ -118,7 +118,10 @@ where
         self
     }
 
-    pub fn with_event_type(mut self, event_type: sweet_async_api::task::emit::event::StreamingEventType<T>) -> Self {
+    pub fn with_event_type(
+        mut self,
+        event_type: sweet_async_api::task::emit::event::StreamingEventType<T>,
+    ) -> Self {
         self.event_type = event_type;
         self
     }
@@ -156,11 +159,13 @@ impl<T: Send + 'static, C: Send + 'static> ReceiverEvent<T, C> for TokioEvent<T,
     }
 
     fn collector(&self) -> &C {
-        self.collector.as_ref().expect("Collector not available for this event")
+        self.collector
+            .as_ref()
+            .expect("Collector not available for this event")
     }
 }
 
-// Simple wrapper implementation for backward compatibility
+// Simple conversion implementation for backward compatibility
 impl<T: Send + 'static, C: Send + 'static> From<T> for TokioEvent<T, C> {
     fn from(data: T) -> Self {
         Self::new(data)
@@ -168,7 +173,12 @@ impl<T: Send + 'static, C: Send + 'static> From<T> for TokioEvent<T, C> {
 }
 
 /// Create a channel for event communication
-pub fn create_event_channel<T: Send + 'static>(buffer_size: usize) -> (TokioEventSender<T>, TokioEventReceiver<T>) {
+pub fn create_event_channel<T: Send + 'static>(
+    buffer_size: usize,
+) -> (TokioEventSender<T>, TokioEventReceiver<T>) {
     let (sender, receiver) = tokio::sync::mpsc::channel(buffer_size);
-    (TokioEventSender::new(sender), TokioEventReceiver::new(receiver))
+    (
+        TokioEventSender::new(sender),
+        TokioEventReceiver::new(receiver),
+    )
 }

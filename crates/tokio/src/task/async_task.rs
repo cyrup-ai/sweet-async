@@ -1,16 +1,15 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use std::path::PathBuf;
 
 use sweet_async_api::orchestra::OrchestratorError;
 use sweet_async_api::orchestra::runtime::Runtime;
 use sweet_async_api::task::{
-    AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, CancellationLevel, 
-    ContextualizedTask, CpuUsage, IoUsage, MemoryUsage, MetricsEnabledTask, 
-    PrioritizedTask, RecoverableTask, StatusEnabledTask, TaskId, TaskPriority, 
-    TaskStatus, TimedTask, TracingTask
+    AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, CancellationLevel,
+    ContextualizedTask, CpuUsage, IoUsage, MemoryUsage, MetricsEnabledTask, PrioritizedTask,
+    RecoverableTask, StatusEnabledTask, TaskId, TaskPriority, TaskStatus, TimedTask, TracingTask,
 };
 // use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::SpawningTask;
@@ -42,27 +41,27 @@ impl TaskMetrics {
             bytes_written: Arc::new(Mutex::new(0)),
         }
     }
-    
+
     async fn update_cpu_time(&self, additional: Duration) {
         let mut cpu_time = self.cpu_time.lock().await;
         *cpu_time += additional;
     }
-    
+
     async fn update_memory(&self, current: u64) {
         let mut memory_current = self.memory_current.lock().await;
         *memory_current = current;
-        
+
         let mut memory_peak = self.memory_peak.lock().await;
         if current > *memory_peak {
             *memory_peak = current;
         }
     }
-    
+
     async fn update_bytes_read(&self, additional: u64) {
         let mut bytes_read = self.bytes_read.lock().await;
         *bytes_read += additional;
     }
-    
+
     async fn update_bytes_written(&self, additional: u64) {
         let mut bytes_written = self.bytes_written.lock().await;
         *bytes_written += additional;
@@ -84,12 +83,10 @@ impl Clone for TaskMetrics {
 impl CpuUsage for TaskMetrics {
     fn cpu_time(&self) -> Duration {
         safe_blocking(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                *self.cpu_time.lock().await
-            })
+            tokio::runtime::Handle::current().block_on(async { *self.cpu_time.lock().await })
         })
     }
-    
+
     fn utilization(&self) -> f64 {
         // For accurate CPU utilization, we would need more sophisticated tracking
         // This is a simplified implementation
@@ -97,7 +94,7 @@ impl CpuUsage for TaskMetrics {
         if cpu_time.as_secs() == 0 {
             return 0.0;
         }
-        
+
         // Estimate based on wall time vs CPU time
         // This is a placeholder implementation
         0.5
@@ -118,17 +115,13 @@ impl CpuUsage for TaskMetrics {
 impl MemoryUsage for TaskMetrics {
     fn current_bytes(&self) -> u64 {
         safe_blocking(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                *self.memory_current.lock().await
-            })
+            tokio::runtime::Handle::current().block_on(async { *self.memory_current.lock().await })
         })
     }
-    
+
     fn peak_bytes(&self) -> u64 {
         safe_blocking(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                *self.memory_peak.lock().await
-            })
+            tokio::runtime::Handle::current().block_on(async { *self.memory_peak.lock().await })
         })
     }
 
@@ -146,17 +139,13 @@ impl MemoryUsage for TaskMetrics {
 impl IoUsage for TaskMetrics {
     fn bytes_read(&self) -> u64 {
         safe_blocking(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                *self.bytes_read.lock().await
-            })
+            tokio::runtime::Handle::current().block_on(async { *self.bytes_read.lock().await })
         })
     }
-    
+
     fn bytes_written(&self) -> u64 {
         safe_blocking(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                *self.bytes_written.lock().await
-            })
+            tokio::runtime::Handle::current().block_on(async { *self.bytes_written.lock().await })
         })
     }
 
@@ -221,7 +210,8 @@ pub struct AsyncTask<T: Clone + Send + 'static, I: TaskId> {
     // Current retry
     current_retry: Arc<Mutex<u8>>,
     // Cancellation callbacks
-    cancel_callbacks: Arc<Mutex<Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>>>,
+    cancel_callbacks:
+        Arc<Mutex<Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>>>,
     // Tracing enabled
     tracing_enabled: bool,
     // Child tasks
@@ -243,7 +233,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     ) -> Self {
         let (cancel_tx, _) = oneshot::channel();
-        
+
         // Create the new task
         Self {
             id,
@@ -270,7 +260,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             name: Arc::new(Mutex::new(None)),
         }
     }
-    
+
     /// Create a new AsyncTask from an existing SpawningTask
     pub fn from_spawning_task(
         task: impl SpawningTask<T, I> + 'static,
@@ -280,9 +270,9 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
     ) -> Self {
         let id = task.task_id();
         let (cancel_tx, cancel_rx) = oneshot::channel();
-        
+
         let task_future = task.into_future();
-        
+
         // Create the new task
         let new_task = Self {
             id,
@@ -308,7 +298,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             name: Arc::new(Mutex::new(None)),
         };
-        
+
         // Create a clone of all the necessary state for the task
         let handle_cl = new_task.handle.clone();
         let status_cl = new_task.status.clone();
@@ -323,7 +313,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         let tracing_enabled = new_task.tracing_enabled;
         let active_tasks_cl = new_task.active_tasks.clone();
         let metrics_cl = new_task.metrics.clone();
-        
+
         // Spawn the task on the Tokio runtime
         let task_handle = runtime.spawn(async move {
             // Monitor cancellation
@@ -334,20 +324,18 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     None
                 }
             };
-            
+
             // Track operation start time
             let start = tokio::time::Instant::now();
-            
+
             // Update task status to Running
             *status_cl.lock().await = TaskStatus::Running;
             // Record start time
             *start_time_cl.lock().await = Some(SystemTime::now());
-            
+
             // Create a future that runs the task
-            let task_fut = async {
-                task_future.await
-            };
-            
+            let task_fut = async { task_future.await };
+
             // Execute the task with timeout if specified
             let task_result = if timeout_dur > Duration::from_secs(0) {
                 match timeout(timeout_dur, task_fut).await {
@@ -357,7 +345,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             } else {
                 task_fut.await
             };
-            
+
             // Process the result
             let result = match task_result {
                 Ok(value) => {
@@ -372,7 +360,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                         *retry += 1;
                         *retry
                     };
-                    
+
                     if current_retry <= retry_count {
                         // TODO: Implement retry logic
                         // For now, just return the error
@@ -384,7 +372,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                             let fallback = fallback_cl.lock().await;
                             fallback.clone()
                         };
-                        
+
                         if let Some(value) = fallback {
                             *status_cl.lock().await = TaskStatus::Completed;
                             Ok(value)
@@ -395,47 +383,47 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     }
                 }
             };
-            
+
             // Update metrics
             let elapsed = start.elapsed();
             metrics_cl.update_cpu_time(elapsed).await;
-            
+
             // Record end time
             *end_time_cl.lock().await = Some(SystemTime::now());
-            
+
             // Store the result
             *result_cl.lock().await = Some(result.clone());
-            
+
             // Execute cancellation callbacks if task was cancelled
             if matches!(*status_cl.lock().await, TaskStatus::Cancelled) {
                 let callbacks = {
                     let callbacks = cancel_callbacks_cl.lock().await;
                     callbacks.iter().map(|f| f()).collect::<Vec<_>>()
                 };
-                
+
                 for callback in callbacks {
                     let _ = callback.await;
                 }
             }
-            
+
             result
         });
-        
+
         // Register the task handle
         futures::executor::block_on(async {
             *handle_cl.lock().await = Some(task_handle.clone());
             active_tasks_cl.lock().await.push(task_handle);
         });
-        
+
         new_task
     }
-    
+
     /// Set a timeout for the task
     pub fn with_timeout(mut self, duration: Duration) -> Self {
         self.timeout = duration;
         self
     }
-    
+
     /// Set a fallback value for the task
     pub fn with_fallback(self, value: T) -> Self {
         futures::executor::block_on(async {
@@ -444,19 +432,19 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         });
         self
     }
-    
+
     /// Set the retry count for the task
     pub fn with_retry(mut self, count: u8) -> Self {
         self.retry_count = count;
         self
     }
-    
+
     /// Enable or disable tracing for the task
     pub fn with_tracing(mut self, enabled: bool) -> Self {
         self.tracing_enabled = enabled;
         self
     }
-    
+
     /// Set the task's parent
     pub fn with_parent(self, parent: Box<dyn std::any::Any + Send + Sync>) -> Self {
         futures::executor::block_on(async {
@@ -465,7 +453,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         });
         self
     }
-    
+
     /// Add a child task
     pub fn add_child(&self, child: Box<dyn std::any::Any + Send + Sync>) {
         futures::executor::block_on(async {
@@ -473,7 +461,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             children.push(child);
         });
     }
-    
+
     /// Set a name for the task
     pub fn with_name(self, name: String) -> Self {
         futures::executor::block_on(async {
@@ -482,7 +470,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         });
         self
     }
-    
+
     /// Get the task name if set
     pub fn name(&self) -> Option<String> {
         futures::executor::block_on(async {
@@ -490,11 +478,11 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             name.clone()
         })
     }
-    
+
     /// Attach a future to this task
     pub fn with_future(
-        self, 
-        future: Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send + 'static>>
+        self,
+        future: Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send + 'static>>,
     ) -> Self {
         // Create clones of all the necessary state for the task
         let handle_cl = self.handle.clone();
@@ -512,16 +500,16 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         let metrics_cl = self.metrics.clone();
         let cancel_cl = self.cancel_tx.clone();
         let runtime = self.runtime.clone();
-        
+
         // Create the cancellation receiver
         let (cancel_tx, cancel_rx) = oneshot::channel();
-        
+
         // Replace the cancel_tx with the new one
         futures::executor::block_on(async {
             let mut tx = cancel_cl.lock().await;
             *tx = Some(cancel_tx);
         });
-        
+
         // Spawn the task on the Tokio runtime
         let task_handle = runtime.spawn(async move {
             // Monitor cancellation
@@ -532,20 +520,18 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     None
                 }
             };
-            
+
             // Track operation start time
             let start = tokio::time::Instant::now();
-            
+
             // Update task status to Running
             *status_cl.lock().await = TaskStatus::Running;
             // Record start time
             *start_time_cl.lock().await = Some(SystemTime::now());
-            
+
             // Create a future that runs the task
-            let task_fut = async {
-                future.await
-            };
-            
+            let task_fut = async { future.await };
+
             // Run the task and cancellation in a select
             let task_result = tokio::select! {
                 _ = cancel_fut => {
@@ -563,7 +549,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     }
                 } => result,
             };
-            
+
             // Process the result
             let result = match task_result {
                 Ok(value) => {
@@ -578,7 +564,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                         *retry += 1;
                         *retry
                     };
-                    
+
                     if current_retry <= retry_count {
                         // TODO: Implement retry logic
                         // For now, just return the error
@@ -590,7 +576,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                             let fallback = fallback_cl.lock().await;
                             fallback.clone()
                         };
-                        
+
                         if let Some(value) = fallback {
                             *status_cl.lock().await = TaskStatus::Completed;
                             Ok(value)
@@ -598,7 +584,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                             match error {
                                 AsyncTaskError::Cancelled => {
                                     *status_cl.lock().await = TaskStatus::Cancelled;
-                                },
+                                }
                                 _ => {
                                     *status_cl.lock().await = TaskStatus::Failed;
                                 }
@@ -608,38 +594,38 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     }
                 }
             };
-            
+
             // Update metrics
             let elapsed = start.elapsed();
             metrics_cl.update_cpu_time(elapsed).await;
-            
+
             // Record end time
             *end_time_cl.lock().await = Some(SystemTime::now());
-            
+
             // Store the result
             *result_cl.lock().await = Some(result.clone());
-            
+
             // Execute cancellation callbacks if task was cancelled
             if matches!(*status_cl.lock().await, TaskStatus::Cancelled) {
                 let callbacks = {
                     let callbacks = cancel_callbacks_cl.lock().await;
                     callbacks.iter().map(|f| f()).collect::<Vec<_>>()
                 };
-                
+
                 for callback in callbacks {
                     let _ = callback.await;
                 }
             }
-            
+
             result
         });
-        
+
         // Register the task handle
         futures::executor::block_on(async {
             *handle_cl.lock().await = Some(task_handle.clone());
             active_tasks_cl.lock().await.push(task_handle);
         });
-        
+
         self
     }
 }
@@ -675,8 +661,11 @@ impl<T: Clone + Send + 'static, I: TaskId> Clone for AsyncTask<T, I> {
 
 impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
     type Output = Result<T, AsyncTaskError>;
-    
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
         let this = Pin::into_inner(self);
         let future = this.runtime.spawn(async {
             // Get the task result
@@ -684,7 +673,7 @@ impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
                 let handle = this.handle.lock().await;
                 handle.clone()
             };
-            
+
             if let Some(handle) = handle {
                 match handle.await {
                     Ok(result) => result,
@@ -694,7 +683,7 @@ impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
                 Err(AsyncTaskError::Failure("Task not started".to_string()))
             }
         });
-        
+
         // Poll the future
         Future::poll(Box::pin(future), cx)
     }
@@ -707,55 +696,58 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
             let mut status = self.status.lock().await;
             *status = TaskStatus::PendingCancellation;
         }
-        
+
         // Send cancellation signal
         let cancel_tx = {
             let mut cancel_tx = self.cancel_tx.lock().await;
             cancel_tx.take()
         };
-        
+
         if let Some(tx) = cancel_tx {
             let _ = tx.send(level);
         }
-        
+
         // If KillHard, abort the task
         if matches!(level, CancellationLevel::KillHard) {
             let handle = {
                 let mut handle = self.handle.lock().await;
                 handle.take()
             };
-            
+
             if let Some(handle) = handle {
                 handle.abort();
             }
         }
-        
+
         // Update status
         {
             let mut status = self.status.lock().await;
             *status = TaskStatus::Cancelled;
         }
-        
+
         // Execute cancellation callbacks
         let callbacks = {
             let callbacks = self.cancel_callbacks.lock().await;
             callbacks.iter().map(|f| f()).collect::<Vec<_>>()
         };
-        
+
         for callback in callbacks {
             let _ = callback.await;
         }
-        
+
         Ok(())
     }
-    
+
     fn is_cancelled(&self) -> bool {
         futures::executor::block_on(async {
             let status = self.status.lock().await;
-            matches!(*status, TaskStatus::Cancelled | TaskStatus::PendingCancellation)
+            matches!(
+                *status,
+                TaskStatus::Cancelled | TaskStatus::PendingCancellation
+            )
         })
     }
-    
+
     fn on_cancel<F, Fut>(&self, callback: F)
     where
         F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
@@ -766,15 +758,15 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
             callbacks.push(Box::new(move || Box::pin(callback.run())));
         });
     }
-    
+
     async fn cancel_gracefully(&self) -> Result<(), OrchestratorError> {
         self.cancel(CancellationLevel::Graceful).await
     }
-    
+
     async fn cancel_forcefully(&self) -> Result<(), OrchestratorError> {
         self.cancel(CancellationLevel::Kill).await
     }
-    
+
     async fn cancel_immediately(&self) -> Result<(), OrchestratorError> {
         self.cancel(CancellationLevel::KillHard).await
     }
@@ -784,19 +776,19 @@ impl<T: Clone + Send + 'static, I: TaskId> TimedTask<T> for AsyncTask<T, I> {
     fn created_timestamp(&self) -> SystemTime {
         self.created_time
     }
-    
+
     fn executed_timestamp(&self) -> SystemTime {
         futures::executor::block_on(async {
             self.start_time.lock().await.unwrap_or(self.created_time)
         })
     }
-    
+
     fn completed_timestamp(&self) -> SystemTime {
         futures::executor::block_on(async {
             self.end_time.lock().await.unwrap_or(self.created_time)
         })
     }
-    
+
     fn timeout(&self) -> Duration {
         self.timeout
     }
@@ -808,16 +800,16 @@ impl<T: Clone + Send + 'static, I: TaskId> TracingTask<T> for AsyncTask<T, I> {
         if self.tracing_enabled {
             tracing::error!("Task error: {:?}", error);
         }
-        
+
         Err(error)
     }
-    
+
     fn record_error(&self, error: &AsyncTaskError) {
         if self.tracing_enabled {
             tracing::error!("Recording error: {:?}", error);
         }
     }
-    
+
     fn is_tracing_enabled(&self) -> bool {
         self.tracing_enabled
     }
@@ -830,18 +822,20 @@ impl<T: Clone + Send + 'static, I: TaskId> ContextualizedTask<T, I> for AsyncTas
         // In a real implementation, this would return the actual child tasks
         Vec::new()
     }
-    
+
     fn parent(&self) -> Option<T> {
         // In a real implementation, this would return the parent task
         None
     }
-    
+
     fn runtime(&self) -> &Self::RuntimeType {
         // Because AsyncTask doesn't currently store a reference to the TokioRuntime
         // we need to panic with an informative message instead of returning a reference
-        panic!("ContextualizedTask::runtime is not directly available. Use AsyncTask::runtime_handle() instead.")
+        panic!(
+            "ContextualizedTask::runtime is not directly available. Use AsyncTask::runtime_handle() instead."
+        )
     }
-    
+
     fn cwd(&self) -> PathBuf {
         self.cwd.clone()
     }
@@ -875,7 +869,7 @@ impl<T: Clone + Send + 'static, I: TaskId> RecoverableTask<T> for AsyncTask<T, I
             }
         })
     }
-    
+
     fn can_recover_from(&self, _error: &AsyncTaskError) -> bool {
         // Check if we have a fallback value
         futures::executor::block_on(async {
@@ -883,7 +877,7 @@ impl<T: Clone + Send + 'static, I: TaskId> RecoverableTask<T> for AsyncTask<T, I
             fallback.is_some()
         })
     }
-    
+
     fn fallback_value(&self) -> Option<T> {
         futures::executor::block_on(async {
             let fallback = self.fallback.lock().await;
@@ -902,75 +896,81 @@ impl<T: Clone + Send + 'static, I: TaskId> MetricsEnabledTask<T> for AsyncTask<T
     type Cpu = TaskMetrics;
     type Memory = TaskMetrics;
     type Io = TaskMetrics;
-    
+
     fn cpu_usage(&self) -> &Self::Cpu {
         &self.metrics
     }
-    
+
     fn memory_usage(&self) -> &Self::Memory {
         &self.metrics
     }
-    
+
     fn io_usage(&self) -> &Self::Io {
         &self.metrics
     }
 }
 
 impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I> {
-    fn to<R: Send + 'static, Task: ApiAsyncTask<R, I>>() -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
+    fn to<R: Send + 'static, Task: ApiAsyncTask<R, I>>()
+    -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
     }
 
-    fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I>>() -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
+    fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I>>()
+    -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
     }
 }
 
-
-impl<T: Clone + Send + 'static + std::fmt::Debug, I: TaskId + std::fmt::Debug> SpawningTask<T, I> for AsyncTask<T, I> {
+impl<T: Clone + Send + 'static + std::fmt::Debug, I: TaskId + std::fmt::Debug> SpawningTask<T, I>
+    for AsyncTask<T, I>
+{
     type TaskResult = crate::task::spawn::TokioTaskResult<T>;
     type OutputFuture = Pin<Box<dyn Future<Output = Self::TaskResult> + Send>>;
-    type JoinChildrenFuture = Pin<Box<dyn Future<Output = Self::JoinChildrenResult> + Send + 'static>>;
+    type JoinChildrenFuture =
+        Pin<Box<dyn Future<Output = Self::JoinChildrenResult> + Send + 'static>>;
     type JoinChildrenResult = crate::task::spawn::TokioAsyncResult<Vec<I>>;
-    type AsyncWork = crate::task::work_wrapper::DynAsyncWork<T>;
-    
+    type AsyncWork = crate::task::async_work::DynAsyncWork<T>;
+
     fn task_id(&self) -> I {
         self.id
     }
 
     fn run(self, work: Self::AsyncWork) -> Self {
         // Execute work in a blocking manner for now
-        let result = futures::executor::block_on(async move {
-            work.run().await
-        });
-        
+        let result = futures::executor::block_on(async move { work.run().await });
+
         {
             let mut task_result = self.result.lock().unwrap();
             *task_result = Some(Ok(result));
         }
-        
+
         self
     }
 
     fn run_child<R>(&self, _task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
     where
         R: Send + 'static,
-        Self: SpawningTask<R, I>
+        Self: SpawningTask<R, I>,
     {
         // Implementation would create and execute a child task
         // This is a placeholder implementation
-        Box::pin(async move { 
-            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        Box::pin(async move {
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 
     fn join_children(&self) -> Self::JoinChildrenFuture {
         // Implementation would wait for all child tasks to complete
         // This is a placeholder implementation
-        Box::pin(async move { 
-            crate::task::spawn::TokioAsyncResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        Box::pin(async move {
+            crate::task::spawn::TokioAsyncResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 
@@ -983,12 +983,14 @@ impl<T: Clone + Send + 'static + std::fmt::Debug, I: TaskId + std::fmt::Debug> S
     where
         F: sweet_async_api::task::builder::AsyncWork<U> + Send + 'static,
         U: Send + 'static,
-        Self: SpawningTask<U, I>
+        Self: SpawningTask<U, I>,
     {
         // Implementation would chain the next operation
         // This is a placeholder implementation
-        Box::pin(async move { 
-            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure("Not implemented yet".to_string()))) 
+        Box::pin(async move {
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 }

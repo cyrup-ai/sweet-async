@@ -9,14 +9,15 @@ use std::time::Duration;
 
 use sweet_async_api::task::TaskId;
 use sweet_async_api::task::builder::{
-    AsyncTaskBuilder as ApiAsyncTaskBuilder, MinMax, ReceiverStrategy, SenderStrategy, ErrorStrategy, AsyncWork,
+    AsyncTaskBuilder as ApiAsyncTaskBuilder, AsyncWork, ErrorStrategy, MinMax, ReceiverStrategy,
+    SenderStrategy,
 };
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 /// Builder for creating and configuring Tokio tasks
-/// 
+///
 /// This builder implements the core configuration options common to all task types,
 /// following the immutable builder pattern where each method returns a new instance.
 #[derive(Clone)]
@@ -47,7 +48,10 @@ where
     I: TaskId,
 {
     /// Create a new builder with the specified runtime and active tasks registry
-    pub fn new_with_runtime(runtime: Handle, active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>) -> Self {
+    pub fn new_with_runtime(
+        runtime: Handle,
+        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    ) -> Self {
         Self {
             name: None,
             runtime,
@@ -58,32 +62,32 @@ where
             _phantom: PhantomData,
         }
     }
-    
+
     /// Get the current runtime handle
     pub fn runtime(&self) -> &Handle {
         &self.runtime
     }
-    
+
     /// Get the active tasks registry
     pub fn active_tasks(&self) -> &Arc<Mutex<Vec<JoinHandle<()>>>> {
         &self.active_tasks
     }
-    
+
     /// Get the configured task name
     pub fn get_name(&self) -> Option<String> {
         self.name.clone()
     }
-    
+
     /// Get the configured timeout
     pub fn get_timeout(&self) -> Duration {
         self.timeout
     }
-    
+
     /// Get the configured retry attempts
     pub fn get_retry_attempts(&self) -> u8 {
         self.retry_attempts
     }
-    
+
     /// Check if tracing is enabled
     pub fn is_tracing_enabled(&self) -> bool {
         self.tracing_enabled
@@ -101,7 +105,7 @@ where
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
         Self::new_with_runtime(runtime, active_tasks)
     }
-    
+
     /// Set a descriptive name for the task
     fn name(self, name: &str) -> Self {
         Self {
@@ -109,7 +113,7 @@ where
             ..self
         }
     }
-    
+
     /// Set a timeout duration for task execution
     fn timeout(self, duration: Duration) -> Self {
         Self {
@@ -117,7 +121,7 @@ where
             ..self
         }
     }
-    
+
     /// Configure the number of retry attempts for failures
     fn retry(self, attempts: u8) -> Self {
         Self {
@@ -125,7 +129,7 @@ where
             ..self
         }
     }
-    
+
     /// Enable or disable detailed execution tracing
     fn tracing(self, enabled: bool) -> Self {
         Self {
