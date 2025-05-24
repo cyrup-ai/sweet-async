@@ -22,6 +22,8 @@ pub mod spawn;
 
 // Utility modules
 pub mod adaptive;
+pub mod async_util;
+pub mod async_work;
 
 // No re-exports - use the modules directly via their clean interfaces
 

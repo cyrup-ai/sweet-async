@@ -30,6 +30,11 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I> for AsyncTask<T, I
         self.id
     }
 
+    fn id(&self) -> I {
+        // Alias for task_id
+        self.task_id()
+    }
+
     fn run(self, work: Self::AsyncWork) -> Self {
         // Create a future from the work function
         let future = async move {
@@ -69,15 +74,26 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I> for AsyncTask<T, I
     }
 
     fn value(&self) -> Option<&T> {
-        // Get the current value if available (completed task)
-        futures::executor::block_on(async {
-            let result = self.result.lock().await;
-            if let Some(Ok(ref value)) = *result {
-                Some(value)
-            } else {
-                None
+        // Check atomic flags first to see if result is available
+        if !self.atomic_result_available.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        
+        if !self.atomic_result_success.load(std::sync::atomic::Ordering::Relaxed) {
+            return None; // Result available but failed
+        }
+        
+        // Try to get the result without blocking
+        match self.result.try_lock() {
+            Ok(result) => {
+                if let Some(Ok(ref value)) = *result {
+                    Some(value)
+                } else {
+                    None
+                }
             }
-        })
+            Err(_) => None, // If locked, return None
+        }
     }
 
     fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture

@@ -6,13 +6,14 @@
 //! We hide all async behind normal methods and a `Stream` so that
 //! the user doesn't need to deal with `async_trait` or pinned futures.
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use num_cpus;
 use rayon::ThreadPool;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -344,7 +345,8 @@ where
                 // Wait for permit
                 let _permit = sema_cl.acquire_owned().await.unwrap();
 
-                let outputs = match task.wait() {
+                let result_future = task.wait();
+                let outputs = match result_future.await {
                     Ok(o) => o,
                     Err(e) => {
                         warn!("Chunk job failed: {e}");

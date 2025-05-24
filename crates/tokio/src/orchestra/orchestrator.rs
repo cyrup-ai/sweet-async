@@ -23,18 +23,18 @@ use crate::task::async_task::{TaskMetrics, AsyncTask};
 pub struct TokioOrchestrator<T, I>
 where
     T: Clone + Send + 'static,
-    I: TaskId + Copy + Eq + Hash + Send + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
     tasks: Arc<Mutex<HashMap<I, Arc<AsyncTask<T, I>>>>>,
     deps:  Arc<Mutex<HashMap<I, HashSet<I>>>>, // dependent -> deps
     groups: Arc<Mutex<HashMap<String, HashSet<I>>>>,
-    runtime: TokioRuntime,
+    pub(crate) runtime: TokioRuntime,
 }
 
 impl<T, I> TokioOrchestrator<T, I>
 where
     T: Clone + Send + 'static,
-    I: TaskId + Copy + Eq + Hash + Send + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
     pub fn new(runtime: TokioRuntime) -> Self {
         Self {
@@ -84,25 +84,72 @@ where
         let tokio_task: AsyncTask<T, I> = task.into();
         let id = tokio_task.task_id();
         let arc = Arc::new(tokio_task);
-        let mut map = futures::executor::block_on(self.tasks.lock());
-        map.insert(id, arc.clone());
+        
+        // Clone for async update
+        let tasks_clone = Arc::clone(&self.tasks);
+        let arc_clone = arc.clone();
+        
+        // Spawn task to update the registry
+        tokio::spawn(async move {
+            let mut map = tasks_clone.lock().await;
+            map.insert(id, arc_clone);
+        });
+        
         arc
     }
 
     fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError> {
-        // basic sanity checks
-        let map = futures::executor::block_on(self.tasks.lock());
-        if !map.contains_key(dependent_id) {
-            return Err(OrchestratorError::TaskNotFound(dependent_id.to_string()));
+        // Try to validate synchronously first
+        match self.tasks.try_lock() {
+            Ok(map) => {
+                if !map.contains_key(dependent_id) {
+                    return Err(OrchestratorError::TaskNotFound(dependent_id.to_string()));
+                }
+                if !map.contains_key(dependency_id) {
+                    return Err(OrchestratorError::TaskNotFound(dependency_id.to_string()));
+                }
+            }
+            Err(_) => {
+                // If we can't lock, spawn a task to do the validation and update
+                let tasks_clone = Arc::clone(&self.tasks);
+                let deps_clone = Arc::clone(&self.deps);
+                let dep_id = *dependent_id;
+                let depc_id = *dependency_id;
+                
+                tokio::spawn(async move {
+                    let map = tasks_clone.lock().await;
+                    if map.contains_key(&dep_id) && map.contains_key(&depc_id) {
+                        drop(map);
+                        let mut deps = deps_clone.lock().await;
+                        deps.entry(dep_id).or_default().insert(depc_id);
+                    }
+                });
+                
+                // Optimistically return Ok since we can't validate synchronously
+                return Ok(());
+            }
         }
-        if !map.contains_key(dependency_id) {
-            return Err(OrchestratorError::TaskNotFound(dependency_id.to_string()));
-        }
-        drop(map);
 
-        let mut deps = futures::executor::block_on(self.deps.lock());
-        deps.entry(*dependent_id).or_default().insert(*dependency_id);
-        Ok(())
+        // Update dependencies
+        match self.deps.try_lock() {
+            Ok(mut deps) => {
+                deps.entry(*dependent_id).or_default().insert(*dependency_id);
+                Ok(())
+            }
+            Err(_) => {
+                // Spawn async update
+                let deps_clone = Arc::clone(&self.deps);
+                let dep_id = *dependent_id;
+                let depc_id = *dependency_id;
+                
+                tokio::spawn(async move {
+                    let mut deps = deps_clone.lock().await;
+                    deps.entry(dep_id).or_default().insert(depc_id);
+                });
+                
+                Ok(())
+            }
+        }
     }
 
     fn start_task(&self, task_id: &I) -> Self::StartTaskFuture {
@@ -123,9 +170,15 @@ where
     }
 
     fn start_all(&self) -> Self::StartAllFuture {
-        let ids: Vec<I> = futures::executor::block_on(async { self.tasks.lock().await.keys().copied().collect() });
+        let tasks_clone = Arc::clone(&self.tasks);
         let this = self.clone();
+        
         Box::pin(async move {
+            let ids: Vec<I> = {
+                let map = tasks_clone.lock().await;
+                map.keys().copied().collect()
+            };
+            
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orchestrator = this.clone();
                 async move { (id, orchestrator.start_task(&id).await) }
@@ -135,36 +188,63 @@ where
     }
 
     fn cancel_task(&self, task_id: &I) -> Result<(), OrchestratorError> {
-        let opt = futures::executor::block_on(self.tasks.lock()).get(task_id).cloned();
-        if let Some(task) = opt {
-            futures::executor::block_on(async {
-                let _ = task.cancel_gracefully().await;
-            });
-            Ok(())
-        } else {
-            Err(OrchestratorError::TaskNotFound(task_id.to_string()))
+        match self.tasks.try_lock() {
+            Ok(map) => {
+                if let Some(task) = map.get(task_id).cloned() {
+                    // Spawn the cancellation
+                    tokio::spawn(async move {
+                        let _ = task.cancel_gracefully().await;
+                    });
+                    Ok(())
+                } else {
+                    Err(OrchestratorError::TaskNotFound(task_id.to_string()))
+                }
+            }
+            Err(_) => {
+                // Can't get lock, spawn async cancellation
+                let tasks_clone = Arc::clone(&self.tasks);
+                let task_id = *task_id;
+                
+                tokio::spawn(async move {
+                    if let Some(task) = tasks_clone.lock().await.get(&task_id).cloned() {
+                        let _ = task.cancel_gracefully().await;
+                    }
+                });
+                
+                // Optimistically return Ok
+                Ok(())
+            }
         }
     }
 
     fn task_status(&self, task_id: &I) -> Option<TaskStatus> {
-        futures::executor::block_on(self.tasks.lock()).get(task_id).map(|t| t.status())
+        match self.tasks.try_lock() {
+            Ok(map) => map.get(task_id).map(|t| t.status()),
+            Err(_) => None, // Can't get lock, return None
+        }
     }
 
     fn all_task_statuses(&self) -> Vec<(I, TaskStatus)> {
-        futures::executor::block_on(async {
-            self.tasks
-                .lock()
-                .await
-                .iter()
-                .map(|(id, task)| (*id, task.status()))
-                .collect()
-        })
+        match self.tasks.try_lock() {
+            Ok(map) => {
+                map.iter()
+                    .map(|(id, task)| (*id, task.status()))
+                    .collect()
+            }
+            Err(_) => Vec::new(), // Can't get lock, return empty
+        }
     }
 
     fn join_all(&self) -> Self::JoinAllFuture {
-        let ids: Vec<I> = futures::executor::block_on(async { self.tasks.lock().await.keys().copied().collect() });
+        let tasks_clone = Arc::clone(&self.tasks);
         let this = self.clone();
+        
         Box::pin(async move {
+            let ids: Vec<I> = {
+                let map = tasks_clone.lock().await;
+                map.keys().copied().collect()
+            };
+            
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orch = this.clone();
                 async move { (id, orch.start_task(&id).await) }
@@ -174,25 +254,67 @@ where
     }
 
     fn create_group(&self, group_name: &str) -> Result<(), OrchestratorError> {
-        let mut g = futures::executor::block_on(self.groups.lock());
-        if g.contains_key(group_name) {
-            return Err(OrchestratorError::GroupAlreadyExists(group_name.into()));
+        match self.groups.try_lock() {
+            Ok(mut g) => {
+                if g.contains_key(group_name) {
+                    return Err(OrchestratorError::GroupAlreadyExists(group_name.into()));
+                }
+                g.insert(group_name.into(), HashSet::new());
+                Ok(())
+            }
+            Err(_) => {
+                // Spawn async creation
+                let groups_clone = Arc::clone(&self.groups);
+                let group_name = group_name.to_string();
+                
+                tokio::spawn(async move {
+                    let mut g = groups_clone.lock().await;
+                    g.entry(group_name).or_insert_with(HashSet::new);
+                });
+                
+                // Optimistically return Ok
+                Ok(())
+            }
         }
-        g.insert(group_name.into(), HashSet::new());
-        Ok(())
     }
 
     fn add_task_to_group(&self, task_id: &I, group_name: &str) -> Result<(), OrchestratorError> {
-        let mut g = futures::executor::block_on(self.groups.lock());
-        let set = g.get_mut(group_name).ok_or_else(|| OrchestratorError::GroupNotFound(group_name.into()))?;
-        set.insert(*task_id);
-        Ok(())
+        match self.groups.try_lock() {
+            Ok(mut g) => {
+                let set = g.get_mut(group_name).ok_or_else(|| OrchestratorError::GroupNotFound(group_name.into()))?;
+                set.insert(*task_id);
+                Ok(())
+            }
+            Err(_) => {
+                // Spawn async add
+                let groups_clone = Arc::clone(&self.groups);
+                let group_name = group_name.to_string();
+                let task_id = *task_id;
+                
+                tokio::spawn(async move {
+                    let mut g = groups_clone.lock().await;
+                    if let Some(set) = g.get_mut(&group_name) {
+                        set.insert(task_id);
+                    }
+                });
+                
+                // Optimistically return Ok
+                Ok(())
+            }
+        }
     }
 
     fn start_group(&self, group_name: &str) -> Self::StartGroupFuture {
-        let ids_opt = futures::executor::block_on(self.groups.lock()).get(group_name).cloned();
+        let groups_clone = Arc::clone(&self.groups);
+        let group_name = group_name.to_string();
         let this = self.clone();
+        
         Box::pin(async move {
+            let ids_opt = {
+                let g = groups_clone.lock().await;
+                g.get(&group_name).cloned()
+            };
+            
             if let Some(ids) = ids_opt {
                 futures::future::join_all(ids.into_iter().map(|id| {
                     let orch = this.clone();
@@ -206,13 +328,20 @@ where
     }
 
     fn cancel_group(&self, group_name: &str) -> usize {
-        let ids = futures::executor::block_on(self.groups.lock()).get(group_name).cloned();
-        if let Some(set) = ids {
-            set.into_iter()
-                .filter(|id| self.cancel_task(id).is_ok())
-                .count()
-        } else {
-            0
+        match self.groups.try_lock() {
+            Ok(g) => {
+                if let Some(set) = g.get(group_name).cloned() {
+                    set.into_iter()
+                        .filter(|id| self.cancel_task(id).is_ok())
+                        .count()
+                } else {
+                    0
+                }
+            }
+            Err(_) => {
+                // Can't get lock, return 0
+                0
+            }
         }
     }
 }

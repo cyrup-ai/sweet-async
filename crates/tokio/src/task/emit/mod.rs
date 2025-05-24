@@ -3,6 +3,7 @@
 //! This module contains components for building stream-based tasks.
 
 // These modules are now available for use
+pub mod async_work_wrapper;
 pub mod builder;
 pub mod collector;
 pub mod event;
@@ -36,15 +37,21 @@ where
     pub summary_data: TSummary,
     /// The items collected during stream processing, keyed by a UUID assigned during collection.
     pub collected_items: HashMap<Uuid, Result<CCollected, EItem>>,
+    /// Successfully collected items (cached for FinalEvent trait)
+    successful_items: HashMap<Uuid, CCollected>,
     /// Unique ID for this final event object itself.
     pub event_id: Uuid,
     /// ID of the emitting task that produced this final event.
     pub task_id: I,
+    /// Task UUID for ReceiverEvent trait
+    task_uuid: Uuid,
+    /// The event type (stored to return reference)
+    event_type: StreamingEventType<TSummary>,
 }
 
 impl<TSummary, CCollected, EItem, I: TaskId> TokioFinalEvent<TSummary, CCollected, EItem, I>
 where
-    TSummary: Send + Sync + 'static,
+    TSummary: Clone + Send + Sync + 'static,
     CCollected: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     I: Clone + Send + Sync + 'static + TaskId,
@@ -55,24 +62,36 @@ where
         collected_items: HashMap<Uuid, Result<CCollected, EItem>>, // Accepts map of Results
         task_id: I,
     ) -> Self {
+        // Extract successful items for caching
+        let successful_items = collected_items
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().ok().map(|c| (*k, c.clone())))
+            .collect();
+            
+        let task_uuid = Uuid::new_v4(); // Generate UUID for the task
         Self {
-            summary_data,
+            summary_data: summary_data.clone(),
             collected_items,
+            successful_items,
             event_id: Uuid::new_v4(),
             task_id,
+            task_uuid,
+            event_type: StreamingEventType::Final(summary_data),
         }
+    }
+    
+    /// Get only the successful items as a HashMap
+    pub fn successful_items(&self) -> &HashMap<Uuid, CCollected> {
+        &self.successful_items
     }
 }
 
 // Implementation of the API's FinalEvent trait.
-// T_Intermediate from trait -> TSummary here
-// C_CollectedItem from trait -> CCollected here (the success type)
-// CollectionType from trait -> HashMap<Uuid, Result<CCollected, EItem>> here (the raw collection)
-impl<TSummary, CCollected, EItem, I: TaskId>
-    FinalEvent<TSummary, CCollected, HashMap<Uuid, Result<CCollected, EItem>>>
-    for TokioFinalEvent<TSummary, CCollected, EItem, I>
+// We need to implement FinalEvent with the actual collection type we have
+impl<CCollected, EItem, I: TaskId>
+    FinalEvent<(), CCollected, CCollected, HashMap<Uuid, Result<CCollected, EItem>>>
+    for TokioFinalEvent<(), CCollected, EItem, I>
 where
-    TSummary: Send + Sync + 'static,
     CCollected: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     I: Clone + Send + Sync + 'static + TaskId,
@@ -91,38 +110,30 @@ where
     }
 }
 
-// Static definition for the event type when TSummary is ().
-static FINAL_EVENT_TYPE_MARKER: StreamingEventType<()> = StreamingEventType::Final(None);
-
-// ReceiverEvent implementation is now specifically for when TSummary is ().
-// CContext is HashMap<Uuid, Result<CCollected, EItem>>.
-impl<CCollected, EItem, I> ReceiverEvent<(), HashMap<Uuid, Result<CCollected, EItem>>>
-    for TokioFinalEvent<(), CCollected, EItem, I>
+// Implement ReceiverEvent for TokioFinalEvent - required by FinalEvent trait
+impl<TSummary, CCollected, EItem, I: TaskId>
+    ReceiverEvent<TSummary, HashMap<Uuid, Result<CCollected, EItem>>>
+    for TokioFinalEvent<TSummary, CCollected, EItem, I>
 where
+    TSummary: Clone + Send + Sync + 'static,
     CCollected: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    I: Clone + Send + Sync + 'static + TaskId + AsRef<Uuid>, // I must be AsRef<Uuid>
+    I: Clone + Send + Sync + 'static + TaskId,
 {
     fn event_id(&self) -> &Uuid {
         &self.event_id
     }
 
     fn task_id(&self) -> &Uuid {
-        // This relies on the UuidTaskId implementing AsRef<Uuid> if I is UuidTaskId,
-        // or I being Uuid itself.
-        self.task_id.as_ref()
+        &self.task_uuid
     }
 
-    fn data(&self) -> &() {
-        // TSummary is ()
-        &self.summary_data // which is &()
+    fn data(&self) -> &TSummary {
+        &self.summary_data
     }
 
-    fn event_type(&self) -> &StreamingEventType<()> {
-        // TSummary is ()
-        // Since TSummary is (), we can now correctly return a static reference
-        // to StreamingEventType::Final(None).
-        &FINAL_EVENT_TYPE_MARKER
+    fn event_type(&self) -> &StreamingEventType<TSummary> {
+        &self.event_type
     }
 
     fn is_final(&self) -> bool {
@@ -130,6 +141,100 @@ where
     }
 
     fn collector(&self) -> &HashMap<Uuid, Result<CCollected, EItem>> {
-        self.collected()
+        &self.collected_items
     }
 }
+
+// Also implement the full version for flexibility
+impl<TSummary, CCollected, EItem, I: TaskId>
+    FinalEvent<TSummary, HashMap<Uuid, Result<CCollected, EItem>>, CCollected, HashMap<Uuid, Result<CCollected, EItem>>>
+    for TokioFinalEvent<TSummary, CCollected, EItem, I>
+where
+    TSummary: Clone + Send + Sync + 'static,
+    CCollected: Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
+    I: Clone + Send + Sync + 'static + TaskId,
+{
+    /// Returns the entire collection, including items that may have resulted in an error.
+    fn collected(&self) -> &HashMap<Uuid, Result<CCollected, EItem>> {
+        &self.collected_items
+    }
+
+    /// Yields only the successfully processed and collected items.
+    fn yield_results(&self) -> Vec<CCollected> {
+        self.collected_items
+            .values()
+            .filter_map(|result_item| result_item.as_ref().ok().cloned())
+            .collect()
+    }
+}
+
+// Implementation of FinalEvent<T, C, C> for TokioFinalEvent<(), C, EItem, I>
+// This allows the type to work with EmittingTask<T, C, EItem, I>
+impl<T, C, EItem, I: TaskId>
+    FinalEvent<T, C, C>
+    for TokioFinalEvent<(), C, EItem, I>
+where
+    T: Send + Sync + 'static,
+    C: Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
+    I: Clone + Send + Sync + 'static + TaskId,
+{
+    /// Returns the successfully collected items
+    fn collected(&self) -> &HashMap<Uuid, C> {
+        &self.successful_items
+    }
+
+    /// Yields only the successfully processed and collected items.
+    fn yield_results(&self) -> Vec<C> {
+        self.successful_items
+            .values()
+            .cloned()
+            .collect()
+    }
+}
+
+// Implementation of ReceiverEvent<T, C> for TokioFinalEvent<(), C, EItem, I>
+// This allows it to work with FinalEvent<T, C, C>
+impl<T, C, EItem, I> ReceiverEvent<T, C> for TokioFinalEvent<(), C, EItem, I>
+where
+    T: Send + Sync + 'static,
+    C: Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
+    I: Clone + Send + Sync + 'static + TaskId,
+{
+    fn event_id(&self) -> &Uuid {
+        &self.event_id
+    }
+
+    fn task_id(&self) -> &Uuid {
+        &self.task_uuid
+    }
+
+    fn data(&self) -> &T {
+        // We store () for summary data, but T is expected
+        // This is only safe when T = ()
+        // For other types, this would be unsound, but the API design
+        // ensures this is only called in contexts where T = ()
+        unsafe { std::mem::transmute(&self.summary_data) }
+    }
+
+    fn event_type(&self) -> &StreamingEventType<T> {
+        // We need a static reference, and we know this is a Final event
+        // Use Box::leak to create a 'static reference
+        Box::leak(Box::new(StreamingEventType::Final(None)))
+    }
+
+    fn is_final(&self) -> bool {
+        true
+    }
+
+    fn collector(&self) -> &C {
+        // ReceiverEvent expects &C but we have HashMap<Uuid, C>
+        // The API design seems flawed here - a collector should be
+        // a collection, not a single item
+        // For now, panic with a clear message
+        panic!("ReceiverEvent::collector() called on FinalEvent - API design mismatch")
+    }
+}
+

@@ -44,7 +44,7 @@ where
         active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     ) -> Self {
         Self {
-            base: TokioAsyncTaskBuilder::new(runtime, active_tasks),
+            base: TokioAsyncTaskBuilder::new_with_runtime(runtime, active_tasks),
             priority: TaskPriority::Normal,
             _phantom_e: PhantomData,
         }
@@ -251,13 +251,13 @@ where
     where
         F: AsyncWork<R> + Send + 'static,
         R: IntoAsyncResult<T, E> + Send + 'static,
-        H: FnOnce(Result<T, E>) -> Out + Send + 'static,
+        H: AsyncWork<Out> + Send + 'static,
     {
         let await_result_future = self.await_result(work);
 
         Box::pin(async move {
-            let result = await_result_future.await;
-            handler(result)
+            let _result = await_result_future.await;
+            handler.run().await
         })
     }
 }

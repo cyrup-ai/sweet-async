@@ -16,7 +16,6 @@ use sweet_async_api::task::TaskPriority;
 use sweet_async_api::task::builder::AsyncTaskBuilder as ApiAsyncTaskBuilderTrait; // Renamed for clarity
 use sweet_async_api::task::builder::{AsyncWork, SenderStrategy}; // Added SenderStrategy
 use sweet_async_api::task::emit::EmittingTaskBuilder as ApiEmittingTaskBuilderTrait; // Added EmittingTaskBuilder trait
-use sweet_async_api::task::emit::SenderBuilder as ApiSenderBuilderTrait;
 use sweet_async_api::task::spawn::SpawningTaskBuilder as ApiSpawningTaskBuilderTrait; // Renamed for clarity // Added SenderBuilder trait
 
 use tokio::runtime::Handle;
@@ -26,8 +25,6 @@ use tokio::task::JoinHandle;
 use crate::task::builder::TokioAsyncTaskBuilder; // This is the struct from task/builder.rs
 use crate::task::spawn::builder::TokioSpawningTaskBuilder;
 // use crate::task::emit::builder::TokioEmittingTaskBuilder; // Will be used by DefaultOrchestratorBuilder for Emitting path
-use crate::orchestrator::TokioOrchestrator;
-use crate::runtime::TokioRuntime;
 use crate::task::async_task::AsyncTask as TokioAsyncTaskStruct;
 use crate::task::emit::builder::TokioSenderBuilder; // Needed for EmittingTaskBuilder impl // Renamed for clarity
 
@@ -97,7 +94,7 @@ where
         retry_count: u8,
         tracing_enabled: bool,
         name: Option<String>,
-        _marker_task: PhantomData<Task>, // Keep marker for Task
+        _marker_task: PhantomData<fn() -> Task>, // Use function pointer to avoid 'static requirement
         _marker_t: PhantomData<T>,       // Keep marker for T
         _marker_i: PhantomData<I>,       // Keep marker for I
     },
@@ -109,7 +106,7 @@ where
         retry_count: u8,
         tracing_enabled: bool,
         name: Option<String>,
-        _marker_task: PhantomData<Task>, // Keep marker for Task
+        _marker_task: PhantomData<fn() -> Task>, // Use function pointer to avoid 'static requirement
         _marker_t: PhantomData<T>,       // Keep marker for T
         _marker_i: PhantomData<I>,       // Keep marker for I
     },
@@ -178,15 +175,15 @@ where
     type Next = Self; // OrchestratorBuilder returns Self to allow further chaining of AsyncTaskBuilder methods
 
     fn orchestrator<
-        O_Impl: TaskOrchestrator<T, Task, I> + sweet_async_api::orchestra::runtime::Runtime<T, I>,
+        OImpl: TaskOrchestrator<T, Task, I>,
     >(
         self,
-        orchestrator: &O_Impl,
+        orchestrator: &OImpl,
     ) -> Self::Next {
         // The sweet_async_api::orchestra::runtime::Runtime trait has:
         // fn runtime_handle(&self) -> &Handle; (assuming Handle is tokio::runtime::Handle via re-export or similar)
         // fn active_tasks(&self) -> Arc<Mutex<Vec<JoinHandle<()>>>>;
-        // We need to ensure O_Impl actually provides these.
+        // We need to ensure OImpl actually provides these.
         // The API Runtime trait has:
         //   associated_type ExecutionHandle: Clone + Send + Sync + 'static;
         //   fn get_execution_handle(&self) -> Self::ExecutionHandle;
@@ -197,7 +194,7 @@ where
         // a Tokio Handle and the active_tasks list. The traits are a bit abstract here.
 
         // For the purpose of this file, and given the tokio context,
-        // let's assume O_Impl is our TokioOrchestrator or provides compatible accessors.
+        // let's assume OImpl is our TokioOrchestrator or provides compatible accessors.
         // This part highlights a potential area where API traits might need to be more concrete
         // or provide clearer pathways to underlying runtime specifics if builders need them.
 
@@ -214,17 +211,8 @@ where
         // Simplification: The OrchestratorBuilder returns Self, and then the Spawning/Emitting builders use the stored context.
         // The `.orchestrator()` call will update the context within DefaultOrchestratorBuilder.
 
-        let new_runtime_handle = orchestrator.get_execution_handle(); // This is O_Impl::ExecutionHandle
-        // We need to convert/assume O_Impl::ExecutionHandle is or contains tokio::runtime::Handle
-        // and provides access to an active_tasks list compatible with Arc<Mutex<Vec<JoinHandle<()>>>>
-
-        // This is where the abstraction of Runtime trait in API meets concrete needs of Tokio impl.
-        // Let's assume `get_execution_handle()` from the Runtime trait on `O_Impl`
-        // gives us something that IS a Tokio Runtime Handle or can provide one,
-        // and that `O_Impl` can also give an `active_tasks` list.
-        // This is not directly supported by the current API traits for generic `O_Impl`.
-
-        // If `O_Impl` is `TokioOrchestrator`, then `orchestrator.runtime.handle` and `orchestrator.runtime.active_tasks` exist.
+        // Since we don't have get_execution_handle() in the API, we'll use the existing runtime_handle
+        // The orchestrator parameter is used to integrate with the orchestration system
         // Let's make the orchestrator method update the internal runtime and active_tasks.
         // The type `Self::Next` for `ApiOrchestratorBuilder` is `AsyncTaskBuilder` from the API.
         // My `DefaultOrchestratorBuilder` already implements `AsyncTaskBuilder`.
@@ -286,7 +274,7 @@ where
                 // when using this concrete implementation of the API traits.
                 let (new_runtime_handle, new_active_tasks) = if let Some(tokio_orc) = (orchestrator
                     as &dyn std::any::Any)
-                    .downcast_ref::<crate::orchestrator::TokioOrchestrator<T, I>>()
+                    .downcast_ref::<crate::orchestra::orchestrator::TokioOrchestrator<T, I>>()
                 {
                     (
                         tokio_orc.runtime.handle.clone(),
@@ -340,7 +328,7 @@ where
             } => {
                 let (new_runtime_handle, new_active_tasks) = if let Some(tokio_orc) = (orchestrator
                     as &dyn std::any::Any)
-                    .downcast_ref::<crate::orchestrator::TokioOrchestrator<T, I>>()
+                    .downcast_ref::<crate::orchestra::orchestrator::TokioOrchestrator<T, I>>()
                 {
                     (
                         tokio_orc.runtime.handle.clone(),
@@ -392,57 +380,6 @@ where
         Self::new_spawning()
     }
 
-    fn name(self, name_str: &str) -> Self {
-        // Added name method
-        match self {
-            Self::Spawning {
-                runtime,
-                active_tasks,
-                priority,
-                timeout,
-                retry_count,
-                tracing_enabled,
-                _marker_task,
-                _marker_t,
-                _marker_i,
-                ..
-            } => Self::Spawning {
-                runtime,
-                active_tasks,
-                priority,
-                timeout,
-                retry_count,
-                tracing_enabled,
-                name: Some(name_str.to_string()),
-                _marker_task,
-                _marker_t,
-                _marker_i,
-            },
-            Self::Emitting {
-                runtime,
-                active_tasks,
-                priority,
-                timeout,
-                retry_count,
-                tracing_enabled,
-                _marker_task,
-                _marker_t,
-                _marker_i,
-                ..
-            } => Self::Emitting {
-                runtime,
-                active_tasks,
-                priority,
-                timeout,
-                retry_count,
-                tracing_enabled,
-                name: Some(name_str.to_string()),
-                _marker_task,
-                _marker_t,
-                _marker_i,
-            },
-        }
-    }
 
     fn timeout(self, duration: std::time::Duration) -> Self {
         match self {
@@ -691,7 +628,6 @@ where
         async move { task.await } // AsyncTask itself is Future
     }
 
-    // await_result_with_handler implementation (simplified, may need adjustment based on AsyncWork for handler)
     fn await_result_with_handler<F, R, H, Out>(
         self,
         work: F,
@@ -702,7 +638,7 @@ where
         R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError>
             + Send
             + 'static,
-        H: FnOnce(Result<T, AsyncTaskError>) -> Out + Send + 'static, // Simpler handler sig for now
+        H: FnOnce(Result<T, AsyncTaskError>) -> Out + Send + 'static,
         Out: Send + 'static,
     {
         let await_result_future = self.await_result(work);
@@ -718,13 +654,13 @@ impl<T, C, E, I> ApiEmittingTaskBuilderTrait<T, C, E, I>
     for DefaultOrchestratorBuilder<T, TokioAsyncTaskStruct<T, I>, I>
 // Assuming Task is TokioAsyncTaskStruct for context
 where
-    T: Send + 'static,
-    C: Send + 'static, // Collected item type
-    E: Send + 'static, // Error type for emitting
+    T: Clone + Send + Sync + 'static,
+    C: Clone + Send + Sync + 'static, // Collected item type
+    E: Send + Sync + 'static, // Error type for emitting
     I: TaskId + Clone + Send + Sync + 'static,
     TokioAsyncTaskStruct<T, I>: ApiAsyncTaskTrait<T, I>, // Ensure the concrete task type implements the API trait
 {
-    type SenderBuilder = TokioSenderBuilder<T, C, E, I>; // The Tokio concrete SenderBuilder
+    type SenderBuilder = TokioSenderBuilder<T, C, E, E, I>; // The Tokio concrete SenderBuilder (EItem=E, EOverall=E)
 
     fn sender<F>(self, sender_work_fn: F, strategy: SenderStrategy) -> Self::SenderBuilder
     where

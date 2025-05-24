@@ -12,19 +12,19 @@ use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::{AsyncResult, TaskResult};
 
 /// Tokio implementation of TaskResult
-pub struct TokioTaskResult<T: Send + 'static + std::fmt::Debug> {
+pub struct TokioTaskResult<T: Send + 'static> {
     /// Task result
     result: Result<T, AsyncTaskError>,
 }
 
-impl<T: Send + 'static + std::fmt::Debug> TokioTaskResult<T> {
+impl<T: Send + 'static> TokioTaskResult<T> {
     /// Create a new task result
     pub fn new(result: Result<T, AsyncTaskError>) -> Self {
         Self { result }
     }
 }
 
-impl<T: Send + 'static + std::fmt::Debug> TaskResult<T> for TokioTaskResult<T> {
+impl<T: Send + 'static> TaskResult<T> for TokioTaskResult<T> {
     fn result(&self) -> Result<&T, &AsyncTaskError> {
         self.result.as_ref()
     }
@@ -51,19 +51,19 @@ impl<T: Send + 'static + std::fmt::Debug> TaskResult<T> for TokioTaskResult<T> {
 }
 
 /// Tokio implementation of AsyncResult
-pub struct TokioAsyncResult<T: Send + 'static + std::fmt::Debug> {
+pub struct TokioAsyncResult<T: Send + 'static> {
     /// Task result
     result: Result<T, AsyncTaskError>,
 }
 
-impl<T: Send + 'static + std::fmt::Debug> TokioAsyncResult<T> {
+impl<T: Send + 'static> TokioAsyncResult<T> {
     /// Create a new async result
     pub fn new(result: Result<T, AsyncTaskError>) -> Self {
         Self { result }
     }
 }
 
-impl<T: Send + 'static + std::fmt::Debug> TaskResult<T> for TokioAsyncResult<T> {
+impl<T: Send + 'static> TaskResult<T> for TokioAsyncResult<T> {
     fn result(&self) -> Result<&T, &AsyncTaskError> {
         self.result.as_ref()
     }
@@ -89,18 +89,18 @@ impl<T: Send + 'static + std::fmt::Debug> TaskResult<T> for TokioAsyncResult<T> 
     }
 }
 
-impl<T: Send + 'static + std::fmt::Debug> AsyncResult<T> for TokioAsyncResult<T> {
-    type AndThenFuture<U> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
-    type AndThenResult<U> = TokioTaskResult<U>;
+impl<T: Send + 'static> AsyncResult<T> for TokioAsyncResult<T> {
+    type AndThenFuture<U: Send + 'static> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
+    type AndThenResult<U: Send + 'static> = TokioTaskResult<U>;
     type OrElseFuture = Pin<Box<dyn Future<Output = Self> + Send + 'static>>;
-    type MapResult<U> = TokioAsyncResult<U>;
+    type MapResult<U: Send + 'static> = TokioAsyncResult<U>;
     type MapErrResult = TokioAsyncResult<T>;
 
     fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>
     where
         F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,
-        U: Send + 'static + std::fmt::Debug,
+        U: Send + 'static,
     {
         Box::pin(async move {
             match self.result {
@@ -136,7 +136,7 @@ impl<T: Send + 'static + std::fmt::Debug> AsyncResult<T> for TokioAsyncResult<T>
     fn map<U, F>(self, f: F) -> Self::MapResult<U>
     where
         F: AsyncWork<U> + Send + 'static,
-        U: Send + 'static + std::fmt::Debug,
+        U: Send + 'static,
     {
         // TODO: implement async work execution
         TokioAsyncResult::new(Err(AsyncTaskError::Failure(
@@ -153,10 +153,16 @@ impl<T: Send + 'static + std::fmt::Debug> AsyncResult<T> for TokioAsyncResult<T>
     }
 
     fn unwrap(self) -> T {
-        self.result.unwrap()
+        match self.result {
+            Ok(value) => value,
+            Err(_) => panic!("called `unwrap()` on an `Err` value"),
+        }
     }
 
     fn unwrap_err(self) -> AsyncTaskError {
-        self.result.unwrap_err()
+        match self.result {
+            Ok(_) => panic!("called `unwrap_err()` on an `Ok` value"),
+            Err(e) => e,
+        }
     }
 }

@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use sweet_async_api::task::TaskId;
-use sweet_async_api::task::builder::ReceiverStrategy;
+use crate::strategies::ReceiverStrategy;
 
 use crate::task::adaptive::{AdaptiveConfig, AdaptixAsyncDsl, build_adaptive_async_stream};
 use tokio_util::sync::CancellationToken;
@@ -27,7 +27,7 @@ pub struct TokioEventCollector<T, C, EItemProc, I: TaskId>
 where
     T: Send + 'static,
     C: Clone + Send + 'static,
-    EItemProc: Send + Sync + 'static, // Error from receiver_fn
+    EItemProc: Clone + Send + Sync + 'static, // Error from receiver_fn
     I: TaskId,
 {
     /// The aggregated results, now a HashMap keyed by event Uuid
@@ -145,7 +145,7 @@ where
 
                             if let Some(dur) = item_processing_timeout {
                                 if tokio::time::timeout(dur, processing_fut).await.is_err() {
-                                    tracing::warn!("SerialCollector: Item processing timed out for event: {:?}", event_data);
+                                    tracing::warn!("SerialCollector: Item processing timed out for event");
                                 }
                             } else {
                                 processing_fut.await;
@@ -442,7 +442,12 @@ where
     }
 }
 
-impl<T, C, EItemProc, I: TaskId> Default for TokioEventCollector<T, C, EItemProc, I> {
+impl<T, C, EItemProc, I: TaskId> Default for TokioEventCollector<T, C, EItemProc, I> 
+where
+    T: Send + 'static,
+    C: Clone + Send + 'static,
+    EItemProc: Send + Sync + 'static,
+{
     fn default() -> Self {
         Self::new()
     }

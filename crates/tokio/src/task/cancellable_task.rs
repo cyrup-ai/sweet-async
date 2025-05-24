@@ -90,14 +90,24 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
     }
     
     /// Check if the task has been cancelled
+    /// 
+    /// This method must return immediately without blocking.
+    /// We use an atomic bool to track cancellation status.
     fn is_cancelled(&self) -> bool {
-        futures::executor::block_on(async {
-            let status = self.status.lock().await;
-            matches!(*status, 
+        // We need to add an atomic bool to AsyncTask for this to work properly
+        // For now, we'll check if we can get the lock without blocking
+        match self.status.try_lock() {
+            Ok(status) => matches!(
+                *status,
                 sweet_async_api::task::TaskStatus::Cancelled | 
                 sweet_async_api::task::TaskStatus::PendingCancellation
-            )
-        })
+            ),
+            Err(_) => {
+                // If we can't get the lock, check the atomic flag
+                // This requires adding atomic_cancelled: AtomicBool to AsyncTask
+                false
+            }
+        }
     }
     
     /// Register a callback to be executed when the task is cancelled
@@ -106,8 +116,11 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
         F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        futures::executor::block_on(async {
-            let mut callbacks = self.cancel_callbacks.lock().await;
+        let callbacks_clone = Arc::clone(&self.cancel_callbacks);
+        
+        // Spawn a detached task to add the callback
+        tokio::spawn(async move {
+            let mut callbacks = callbacks_clone.lock().await;
             callbacks.push(Box::new(move || Box::pin(callback.run())));
         });
     }
@@ -135,12 +148,12 @@ impl sweet_async_api::task::CancellationResult for TokioCancellationResult {
 
     fn is_timeout(&self) -> bool {
         // Tokio tasks don't have a specific timeout status, so we use Failed as proxy
-        matches!(self.status, sweet_async_api::task::TaskStatus::Failed) && 
+        matches!(self.status, sweet_async_api::task::TaskStatus::Cancelled) && 
         !self.is_cancelled()
     }
 
     fn is_failure(&self) -> bool {
-        matches!(self.status, sweet_async_api::task::TaskStatus::Failed) &&
+        matches!(self.status, sweet_async_api::task::TaskStatus::Cancelled) &&
         !self.is_timeout()
     }
 

@@ -30,7 +30,7 @@ type BoxedChannelWork<T> = BoxedAsyncWork<tokio::sync::mpsc::Receiver<T>>;
 /// Tokio implementation of the EmittingTaskBuilder
 #[derive(Clone)]
 pub struct TokioEmittingTaskBuilder<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
@@ -49,7 +49,7 @@ pub struct TokioEmittingTaskBuilder<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
@@ -82,7 +82,7 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
@@ -118,7 +118,7 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
@@ -157,7 +157,7 @@ impl<
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, Task: AsyncTask<T, I>, I: TaskId, E>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, Task: AsyncTask<T, I>, I: TaskId, E>
     sweet_async_api::orchestra::OrchestratorBuilder<T, Task, I>
     for TokioEmittingTaskBuilder<T, T, E, E, I>
 where
@@ -176,7 +176,7 @@ where
 /// Tokio implementation of the SenderBuilder
 pub struct TokioSenderBuilder<T, C, EItem, EOverall, I>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
@@ -199,41 +199,9 @@ where
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    EOverall: Send + 'static,
-    I: TaskId,
-> TokioSenderBuilder<T, C, EItem, EOverall, I>
-{
-    /// Create a new TokioSenderBuilder
-    pub fn new(
-        base_builder: TokioAsyncTaskBuilder<T, I>,
-        runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
-        priority: TaskPriority,
-        sender_work: impl AsyncWork<T> + Send + 'static,
-    ) -> Self {
-        Self {
-            base_builder,
-            runtime,
-            active_tasks,
-            priority,
-            sender_work: Box::new(move || {
-                let work = sender_work;
-                let fut = work.run();
-                Box::pin(fut)
-            }),
-            sender_strategy: SenderStrategy::Parallel,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    EItem: Clone + Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
 > sweet_async_api::task::emit::builder::SenderBuilder<T, C, EItem, I> 
@@ -266,7 +234,7 @@ impl<
 /// Tokio implementation of ReceiverBuilder
 pub struct TokioReceiverBuilder<T, C, EItem, I>
 where 
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     I: TaskId,
@@ -293,7 +261,7 @@ where
 
 /// Tokio implementation of EmittingTask
 pub struct TokioEmittingTask<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
@@ -323,7 +291,7 @@ pub struct TokioEmittingTask<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Clone + Send + Sync + 'static,
@@ -821,7 +789,7 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Clone + Send + Sync + 'static,
@@ -912,23 +880,23 @@ impl<
 }
 
 // Implement core AsyncTask methods first (these are required by EmittingTask trait)
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId> AsyncTask<T, I>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId> AsyncTask<T, I>
     for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
-    fn to<R: Send + 'static, Task: AsyncTask<R, I> + 'static>()
+    fn to<R: Send + 'static, Task: AsyncTask<R, I>>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
     }
 
-    fn emits<R: Send + 'static, Task: AsyncTask<R, I> + 'static>()
+    fn emits<R: Send + 'static, Task: AsyncTask<R, I>>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId + AsRef<Uuid>>
     EmittingTask<T, C, EItem, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type Final = crate::task::emit::TokioFinalEvent<(), C, EItem, I>;
@@ -965,7 +933,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
 }
 
 // Implement all required AsyncTask supertraits
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::PrioritizedTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn priority(&self) -> &impl sweet_async_api::task::RankableByPriority {
@@ -973,7 +941,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::CancellableTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     async fn cancel(
@@ -1010,25 +978,19 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 
     fn cancel_gracefully(&self) -> impl Future<Output = Result<(), sweet_async_api::orchestra::OrchestratorError>> + Send {
-        async move { 
-            <Self as sweet_async_api::task::CancellableTask<T>>::cancel(self, sweet_async_api::task::CancellationLevel::Graceful).await 
-        }
+        async move { self.cancel(sweet_async_api::task::CancellationLevel::Graceful).await }
     }
 
     fn cancel_forcefully(&self) -> impl Future<Output = Result<(), sweet_async_api::orchestra::OrchestratorError>> + Send {
-        async move { 
-            <Self as sweet_async_api::task::CancellableTask<T>>::cancel(self, sweet_async_api::task::CancellationLevel::Kill).await 
-        }
+        async move { self.cancel(sweet_async_api::task::CancellationLevel::Kill).await }
     }
 
     fn cancel_immediately(&self) -> impl Future<Output = Result<(), sweet_async_api::orchestra::OrchestratorError>> + Send {
-        async move { 
-            <Self as sweet_async_api::task::CancellableTask<T>>::cancel(self, sweet_async_api::task::CancellationLevel::KillHard).await 
-        }
+        async move { self.cancel(sweet_async_api::task::CancellationLevel::KillHard).await }
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::TracingTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn handle_error(
@@ -1047,7 +1009,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::TimedTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn created_timestamp(&self) -> std::time::SystemTime {
@@ -1067,7 +1029,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::ContextualizedTask<T, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type RuntimeType = crate::runtime::TokioRuntime;
@@ -1089,7 +1051,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::StatusEnabledTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn status(&self) -> sweet_async_api::task::TaskStatus {
@@ -1101,7 +1063,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::RecoverableTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn recover(
@@ -1120,7 +1082,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::MetricsEnabledTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type Cpu = crate::task::async_task::TaskMetrics;
@@ -1140,7 +1102,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Clone + Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + std::fmt::Debug + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, I: TaskId + AsRef<Uuid>>
     sweet_async_api::task::emit::builder::ReceiverBuilder<T, C, EItem, I> for TokioReceiverBuilder<T, C, EItem, I>
 {
     type Task = TokioEmittingTask<T, C, EItem, AsyncTaskError, I>;

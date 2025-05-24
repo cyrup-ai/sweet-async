@@ -156,10 +156,10 @@ impl<T: Clone + Send + 'static, C: Send + Clone + 'static, E: Send + 'static, I:
         // and return the aggregated result
         
         // Get the result from the receiver task
-        let receiver_handle = futures::executor::block_on(async {
+        let receiver_handle = {
             let handle = self.receiver_handle.lock().await;
             handle.clone()
-        });
+        };
         
         if let Some(handle) = receiver_handle {
             match handle.await {
@@ -215,27 +215,35 @@ impl<T: Clone + Send + 'static, C: Send + Clone + 'static, E: Send + 'static, I:
     type Final = TokioFinalEvent<T, C>;
     
     fn is_complete(&self) -> bool {
-        // Already implemented in builder.rs
-        futures::executor::block_on(async {
-            self.final_result.lock().await.is_some()
-        })
+        // Try to check without blocking
+        match self.final_result.try_lock() {
+            Ok(result) => result.is_some(),
+            Err(_) => false, // If locked, assume not complete
+        }
     }
     
     fn cancel(&self) -> Result<(), OrchestratorError> {
-        // Already implemented in builder.rs
-        futures::executor::block_on(async {
-            let cancel_tx = self.cancel_tx.clone();
-            
-            let sender = {
-                let mut tx = cancel_tx.lock().await;
-                tx.take()
-            };
-            
-            if let Some(tx) = sender {
-                let _ = tx.send(());
+        // Try to cancel without blocking
+        let cancel_tx = Arc::clone(&self.cancel_tx);
+        
+        match cancel_tx.try_lock() {
+            Ok(mut tx) => {
+                if let Some(sender) = tx.take() {
+                    let _ = sender.send(());
+                }
+                Ok(())
             }
-            
-            Ok(())
-        })
+            Err(_) => {
+                // Can't get lock, spawn async cancellation
+                tokio::spawn(async move {
+                    let mut tx = cancel_tx.lock().await;
+                    if let Some(sender) = tx.take() {
+                        let _ = sender.send(());
+                    }
+                });
+                
+                Ok(())
+            }
+        }
     }
 }

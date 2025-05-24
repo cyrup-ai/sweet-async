@@ -473,11 +473,8 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                 }
             }
             
-            // Clean up completed task from active tasks list
-            {
-                let mut tasks = active_tasks_cl.lock().await;
-                tasks.retain(|handle| !handle.is_finished());
-            }
+            // Decrement active task count
+            active_tasks_cl.fetch_sub(1, Ordering::SeqCst);
             
             result
         });
@@ -492,6 +489,147 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
 
         new_task
     }
+            timeout: Duration::from_secs(0), // Default - no timeout
+            runtime: runtime.clone(),
+            active_tasks,
+            metrics: TaskMetrics::new(),
+            fallback: Arc::new(Mutex::new(None)),
+            retry_count: 0,
+            current_retry: Arc::new(AtomicU8::new(0)),
+            cancel_callbacks: Arc::new(Mutex::new(Vec::new())),
+            tracing_enabled: false,
+            child_tasks: Arc::new(Mutex::new(Vec::new())),
+            parent: Arc::new(Mutex::new(None)),
+            atomic_cancelled: Arc::new(AtomicBool::new(false)),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            name: Arc::new(Mutex::new(None)),
+        };
+
+        // Create a clone of all the necessary state for the task
+        let handle_cl = new_task.handle.clone();
+        let status_cl = new_task.status.clone();
+        let result_cl = new_task.result.clone();
+        let success_value_cl = new_task.success_value.clone();
+        let start_time_cl = new_task.start_time.clone();
+        let end_time_cl = new_task.end_time.clone();
+        let timeout_dur = new_task.timeout;
+        let fallback_cl = new_task.fallback.clone();
+        let retry_count = new_task.retry_count;
+        let current_retry_cl = new_task.current_retry.clone();
+        let cancel_callbacks_cl = new_task.cancel_callbacks.clone();
+        let tracing_enabled = new_task.tracing_enabled;
+        let active_tasks_cl = new_task.active_tasks.clone();
+        let metrics_cl = new_task.metrics.clone();
+
+        // Spawn the task on the Tokio runtime
+        let task_handle = runtime.spawn(async move {
+            // Monitor cancellation
+            let cancel_fut = async {
+                if let Ok(level) = cancel_rx.await {
+                    Some(level)
+                } else {
+                    None
+                }
+            };
+
+            // Track operation start time
+            let start = tokio::time::Instant::now();
+
+            // Update task status to Running
+            *status_cl.lock().await = TaskStatus::Running;
+            // Record start time
+            *start_time_cl.lock().await = Some(SystemTime::now());
+
+            // Create a future that runs the task
+            let task_fut = async { task_future.await };
+
+            // Execute the task with timeout if specified
+            let task_result = if timeout_dur > Duration::from_secs(0) {
+                match timeout(timeout_dur, task_fut).await {
+                    Ok(result) => result,
+                    Err(_) => Err(AsyncTaskError::Timeout(timeout_dur)),
+                }
+            } else {
+                task_fut.await
+            };
+
+            // Process the result
+            let result = match task_result {
+                Ok(value) => {
+                    // Task completed successfully
+                    *status_cl.lock().await = TaskStatus::Completed;
+                    // Store the value in OnceCell for value() method
+                    let _ = success_value_cl.set(value.clone());
+                    Ok(value)
+                }
+                Err(error) => {
+                    // Check if we should retry
+                    let current_retry = current_retry_cl.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+
+                    if current_retry <= retry_count {
+                        // TODO: Implement retry logic
+                        // For now, just return the error
+                        *status_cl.lock().await = TaskStatus::Pending;
+                        Err(error)
+                    } else {
+                        // Check for fallback
+                        let fallback = {
+                            let fallback = fallback_cl.lock().await;
+                            fallback.clone()
+                        };
+
+                        if let Some(value) = fallback {
+                            *status_cl.lock().await = TaskStatus::Completed;
+                            // Store the fallback value in OnceCell
+                            let _ = success_value_cl.set(value.clone());
+                            Ok(value)
+                        } else {
+                            *status_cl.lock().await = TaskStatus::Cancelled;
+                            Err(error)
+                        }
+                    }
+                }
+            };
+
+            // Update metrics
+            let elapsed = start.elapsed();
+            metrics_cl.update_cpu_time(elapsed).await;
+
+            // Record end time
+            *end_time_cl.lock().await = Some(SystemTime::now());
+
+            // Execute cancellation callbacks if task was cancelled
+            if matches!(*status_cl.lock().await, TaskStatus::Cancelled) {
+                let callbacks = {
+                    let callbacks = cancel_callbacks_cl.lock().await;
+                    callbacks.iter().map(|f| f()).collect::<Vec<_>>()
+                };
+
+                for callback in callbacks {
+                    let _ = callback.await;
+                }
+            }
+
+            // Note: We don't store the result to avoid Clone requirement on T
+            // The value() method will need to be implemented differently
+
+            result
+        });
+
+        // Register the task handle asynchronously
+        {
+            tokio::spawn(async move {
+                // Create a void handle for the active_tasks list since we can't clone JoinHandle
+                let void_handle = tokio::spawn(async {});
+                *handle_cl.lock().await = Some(task_handle);
+                active_tasks_cl.lock().await.push(void_handle);
+            });
+        }
+
+        new_task
+    }
+
+    /// Set a timeout for the task
     pub fn with_timeout(mut self, duration: Duration) -> Self {
         self.timeout = duration;
         self
@@ -566,7 +704,6 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         let handle_cl = self.handle.clone();
         let status_cl = self.status.clone();
         let result_cl = self.result.clone();
-        let success_value_cl = self.success_value.clone();
         let start_time_cl = self.start_time.clone();
         let end_time_cl = self.end_time.clone();
         let timeout_dur = self.timeout;
@@ -610,6 +747,9 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             // Record start time
             *start_time_cl.lock().await = Some(SystemTime::now());
 
+            // Create a future that runs the task
+            let task_fut = async { future.await };
+
             // Run the task and cancellation in a select
             let task_result = tokio::select! {
                 _ = cancel_fut => {
@@ -618,12 +758,12 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                 result = async {
                     // Execute the task with timeout if specified
                     if timeout_dur > Duration::from_secs(0) {
-                        match timeout(timeout_dur, future).await {
+                        match timeout(timeout_dur, task_fut).await {
                             Ok(result) => result,
                             Err(_) => Err(AsyncTaskError::Timeout(timeout_dur)),
                         }
                     } else {
-                        future.await
+                        task_fut.await
                     }
                 } => result,
             };
@@ -638,27 +778,37 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
                     Ok(value)
                 }
                 Err(error) => {
-                    // Check for fallback value on error
-                    let fallback = {
-                        let fallback = fallback_cl.lock().await;
-                        fallback.clone()
-                    };
+                    // Check if we should retry
+                    let current_retry = current_retry_cl.fetch_add(1, AtomicOrdering::SeqCst) + 1;
 
-                    if let Some(value) = fallback {
-                        *status_cl.lock().await = TaskStatus::Completed;
-                        // Store the fallback value in OnceCell
-                        let _ = success_value_cl.set(value.clone());
-                        Ok(value)
-                    } else {
-                        match error {
-                            AsyncTaskError::Cancelled => {
-                                *status_cl.lock().await = TaskStatus::Cancelled;
-                            }
-                            _ => {
-                                *status_cl.lock().await = TaskStatus::Cancelled;
-                            }
-                        }
+                    if current_retry <= retry_count {
+                        // TODO: Implement retry logic
+                        // For now, just return the error
+                        *status_cl.lock().await = TaskStatus::Cancelled;
                         Err(error)
+                    } else {
+                        // Check for fallback
+                        let fallback = {
+                            let fallback = fallback_cl.lock().await;
+                            fallback.clone()
+                        };
+
+                        if let Some(value) = fallback {
+                            *status_cl.lock().await = TaskStatus::Completed;
+                            // Store the fallback value in OnceCell
+                            let _ = success_value_cl.set(value.clone());
+                            Ok(value)
+                        } else {
+                            match error {
+                                AsyncTaskError::Cancelled => {
+                                    *status_cl.lock().await = TaskStatus::Cancelled;
+                                }
+                                _ => {
+                                    *status_cl.lock().await = TaskStatus::Cancelled;
+                                }
+                            }
+                            Err(error)
+                        }
                     }
                 }
             };
@@ -764,8 +914,7 @@ impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
         });
 
         // Poll the future
-        let mut pinned = Box::pin(future);
-        pinned.as_mut().poll(cx)
+        Future::poll(Box::pin(future), cx)
     }
 }
 
@@ -997,13 +1146,13 @@ impl<T: Clone + Send + 'static, I: TaskId> MetricsEnabledTask<T> for AsyncTask<T
 }
 
 impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I> {
-    fn to<R: Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
+    fn to<R: Send + 'static, Task: ApiAsyncTask<R, I>>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
     }
 
-    fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
+    fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I>>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
         DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
@@ -1028,12 +1177,11 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I>
         // Spawn the work asynchronously
         let result_clone = Arc::clone(&self.result);
         let success_value_clone = Arc::clone(&self.success_value);
-        let handle: JoinHandle<Result<T, AsyncTaskError>> = self.runtime.spawn(async move {
+        let handle = self.runtime.spawn(async move {
             let work_result = <Self::AsyncWork as AsyncWork<T>>::run(work).await;
             let mut task_result = result_clone.lock().await;
             *task_result = Some(Ok(work_result.clone()));
-            let _ = success_value_clone.set(work_result.clone());
-            Ok(work_result)
+            let _ = success_value_clone.set(work_result);
         });
         
         // Store the handle
@@ -1046,48 +1194,27 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I>
         self
     }
 
-    fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
+    fn run_child<R>(&self, _task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
     where
         R: Send + 'static,
         Self: SpawningTask<R, I>,
     {
-        // Create a child task and execute it
-        let child_id = self.id; // For now, use parent's ID
-        let runtime = self.runtime.clone();
-        let active_tasks = self.active_tasks.clone();
-        
+        // Implementation would create and execute a child task
+        // This is a placeholder implementation
         Box::pin(async move {
-            // Create a new task for the child
-            let child_task = AsyncTask::<R, I>::new(
-                child_id,
-                TaskPriority::Normal,
-                runtime,
-                active_tasks,
-            );
-            
-            // Execute the child task
-            let result = child_task.await;
-            
-            // Wrap in TaskResult
-            crate::task::spawn::TokioTaskResult::new(result)
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 
     fn join_children(&self) -> Self::JoinChildrenFuture {
-        // Wait for all child tasks to complete
-        let child_tasks = self.child_tasks.clone();
-        
+        // Implementation would wait for all child tasks to complete
+        // This is a placeholder implementation
         Box::pin(async move {
-            let tasks = child_tasks.lock().await;
-            let mut child_ids = Vec::new();
-            
-            // Collect all child task IDs
-            for child in tasks.iter() {
-                // For now, we'll just return empty vec since we don't have proper child tracking
-                // A full implementation would track child task IDs properly
-            }
-            
-            crate::task::spawn::TokioAsyncResult::new(Ok(child_ids))
+            crate::task::spawn::TokioAsyncResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 
@@ -1095,40 +1222,18 @@ impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I>
         self.success_value.get()
     }
 
-    fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
+    fn chain<U, F>(self, _f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
     where
         F: sweet_async_api::task::builder::AsyncWork<U> + Send + 'static,
         U: Send + 'static,
         Self: SpawningTask<U, I>,
     {
-        // Chain the next operation after this task completes
-        let task_id = self.id;
-        let runtime = self.runtime.clone();
-        let active_tasks = self.active_tasks.clone();
-        
+        // Implementation would chain the next operation
+        // This is a placeholder implementation
         Box::pin(async move {
-            // First execute this task
-            let first_result = self.await;
-            
-            match first_result {
-                Ok(_) => {
-                    // If first task succeeded, run the chained work
-                    let chained_task = AsyncTask::<U, I>::new(
-                        task_id,
-                        TaskPriority::Normal,
-                        runtime,
-                        active_tasks,
-                    );
-                    
-                    // Execute the chained work
-                    let chained_result = f.run().await;
-                    crate::task::spawn::TokioTaskResult::new(Ok(chained_result))
-                }
-                Err(e) => {
-                    // If first task failed, propagate the error
-                    crate::task::spawn::TokioTaskResult::new(Err(e))
-                }
-            }
+            crate::task::spawn::TokioTaskResult::new(Err(AsyncTaskError::Failure(
+                "Not implemented yet".to_string(),
+            )))
         })
     }
 }

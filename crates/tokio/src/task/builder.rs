@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sweet_async_api::task::TaskId;
-use sweet_async_api::task::builder::{
+pub use sweet_async_api::task::builder::{
     AsyncTaskBuilder as ApiAsyncTaskBuilder, AsyncWork, ErrorStrategy, MinMax, ReceiverStrategy,
     SenderStrategy,
 };
@@ -106,14 +106,6 @@ where
         Self::new_with_runtime(runtime, active_tasks)
     }
 
-    /// Set a descriptive name for the task
-    fn name(self, name: &str) -> Self {
-        Self {
-            name: Some(name.to_string()),
-            ..self
-        }
-    }
-
     /// Set a timeout duration for task execution
     fn timeout(self, duration: Duration) -> Self {
         Self {
@@ -134,6 +126,16 @@ where
     fn tracing(self, enabled: bool) -> Self {
         Self {
             tracing_enabled: enabled,
+            ..self
+        }
+    }
+}
+
+impl<T: Send + 'static, I: TaskId> TokioAsyncTaskBuilder<T, I> {
+    /// Set a descriptive name for the task (extension method)
+    pub fn name(self, name: &str) -> Self {
+        Self {
+            name: Some(name.to_string()),
             ..self
         }
     }

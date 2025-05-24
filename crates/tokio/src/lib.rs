@@ -1,10 +1,22 @@
 pub mod builder;
+pub mod duration_ext;
+pub mod orchestra;
 pub mod runtime;
+pub mod strategies;
 pub mod task;
 
+#[cfg(test)]
+mod test_basic_api;
+#[cfg(test)]
+mod test_full_api;
+#[cfg(test)]
+mod test_emit_api;
+
 // Re-export core components
+pub use duration_ext::DurationExt;
 pub use runtime::TokioRuntime;
 pub use runtime::safe_blocking;
+pub use strategies::{SenderStrategy, ReceiverStrategy};
 
 use sweet_async_api::task::TaskId;
 
