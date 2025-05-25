@@ -16,7 +16,8 @@
       "Bash(grep:*)",
       "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio)",
       "Bash(cargo nextest:*)",
-      "Bash(perl:*)"
+      "Bash(perl:*)",
+      "mcp__server-sequential-thinking__sequentialthinking"
     ],
     "deny": []
   }

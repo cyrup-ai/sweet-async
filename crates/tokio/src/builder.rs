@@ -27,7 +27,7 @@ use crate::task::builder::TokioAsyncTaskBuilder; // This is the struct from task
 use crate::task::spawn::builder::TokioSpawningTaskBuilder;
 // use crate::task::emit::builder::TokioEmittingTaskBuilder; // Will be used by DefaultOrchestratorBuilder for Emitting path
 use crate::task::async_task::AsyncTask as TokioAsyncTaskStruct;
-use crate::task::emit::builder::TokioSenderBuilder; // Needed for EmittingTaskBuilder impl // Renamed for clarity
+use crate::task::emit::builder::EmittingTaskBuilder; // Needed for EmittingTaskBuilder impl
 
 /// Creates a new base task builder with default settings
 ///
@@ -81,37 +81,6 @@ pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>
 }
 
 /// Orchestrator builder that can forward method calls
-pub enum DefaultOrchestratorBuilder<T, Task, I>
-where
-    T: Clone + Send + 'static,
-    Task: ApiAsyncTaskTrait<T, I> + 'static,
-    I: TaskId,
-{
-    Spawning {
-        runtime: Handle,
-        active_tasks: Arc<AtomicUsize>,
-        priority: TaskPriority,
-        timeout: Option<Duration>,
-        retry_count: u8,
-        tracing_enabled: bool,
-        name: Option<String>,
-        _marker_task: PhantomData<fn() -> Task>, // Use function pointer to avoid 'static requirement
-        _marker_t: PhantomData<T>,       // Keep marker for T
-        _marker_i: PhantomData<I>,       // Keep marker for I
-    },
-    Emitting {
-        runtime: Handle,
-        active_tasks: Arc<AtomicUsize>,
-        priority: TaskPriority,
-        timeout: Option<Duration>,
-        retry_count: u8,
-        tracing_enabled: bool,
-        name: Option<String>,
-        _marker_task: PhantomData<fn() -> Task>, // Use function pointer to avoid 'static requirement
-        _marker_t: PhantomData<T>,       // Keep marker for T
-        _marker_i: PhantomData<I>,       // Keep marker for I
-    },
-}
 
 impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
 where
@@ -598,8 +567,11 @@ where
             + Send
             + 'static,
     {
-        let task = self.run(work); // This now correctly configures the task
-        async move { task.await } // AsyncTask itself is Future
+        // Just run the work directly and convert the result
+        async move {
+            let result = work.run().await;
+            result.into_async_result()
+        }
     }
 
     fn await_result_with_handler<F, R, H, Out>(

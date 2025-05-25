@@ -531,13 +531,47 @@ where F: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static + Clone
 {
     fn to<R: Clone + Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
-        use crate::builder::DefaultOrchestratorBuilder;
-        DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
+        // Return a simple orchestrator builder
+        struct SimpleOrchestratorBuilder<R, Task, I>(std::marker::PhantomData<(R, Task, I)>);
+        
+        impl<R: Clone + Send + 'static, Task: ApiAsyncTask<R, I> + 'static, I: TaskId> 
+            sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> for SimpleOrchestratorBuilder<R, Task, I>
+        {
+            type Next = crate::task::spawn::builder::TokioSpawningTaskBuilder<R, AsyncTaskError, I>;
+            
+            fn orchestrator<O: sweet_async_api::orchestra::TaskOrchestrator<R, Task, I>>(
+                self,
+                _orchestrator: &O,
+            ) -> Self::Next {
+                crate::task::spawn::builder::TokioSpawningTaskBuilder::new(
+                    tokio::runtime::Handle::current(),
+                    std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))
+                )
+            }
+        }
+        
+        SimpleOrchestratorBuilder(std::marker::PhantomData)
     }
     
     fn emits<R: Clone + Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
-        use crate::builder::DefaultOrchestratorBuilder;
-        DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
+        // For emitting tasks, we need a wrapper that defers the type parameters
+        // until .sender() is called
+        struct EmittingOrchestratorBuilder<R, Task, I>(std::marker::PhantomData<(R, Task, I)>);
+        
+        impl<R: Clone + Send + 'static, Task: ApiAsyncTask<R, I> + 'static, I: TaskId>
+            sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> for EmittingOrchestratorBuilder<R, Task, I>
+        {
+            type Next = Self;
+            
+            fn orchestrator<O: sweet_async_api::orchestra::TaskOrchestrator<R, Task, I>>(
+                self,
+                _orchestrator: &O,
+            ) -> Self::Next {
+                self
+            }
+        }
+        
+        EmittingOrchestratorBuilder(std::marker::PhantomData)
     }
 }
