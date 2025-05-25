@@ -1,25 +1,27 @@
 use std::path::PathBuf;
 
 use crate::orchestra::runtime::Runtime;
+use crate::task::task_communication::TaskRelationships;
 
 /// Task that has execution context information
 ///
 /// The ContextualizedTask trait provides information about the task's
-/// execution context, including parent-child relationships and runtime environment.
-/// This enables hierarchical task management and coordinated execution.
-pub trait ContextualizedTask<T: Send + 'static, I: crate::task::TaskId> {
+/// execution context, including communication channels with related tasks
+/// and runtime environment. This enables decoupled task communication
+/// and coordinated execution through message passing.
+pub trait ContextualizedTask<T: Clone + Send + 'static, I: crate::task::TaskId> {
     type RuntimeType: Runtime<T, I>;
-    /// Get a list of all child tasks spawned by this task
+    
+    /// Get communication handles for this task's relationships
     ///
-    /// Returns the IDs of all tasks that were spawned as children of this task.
-    /// Child tasks are automatically canceled if the parent task is canceled.
-    fn child_tasks(&self) -> Vec<T>;
+    /// Returns handles for communicating with parent and child tasks
+    /// through message passing channels.
+    fn relationships(&self) -> &TaskRelationships<T, I>;
 
-    /// Get this task's parent, if it has one
+    /// Get mutable communication handles for this task's relationships
     ///
-    /// Returns the ID of the parent task if this task was spawned as a child task.
-    /// If this is a root task, returns None.
-    fn parent(&self) -> Option<T>;
+    /// Returns mutable handles for managing parent and child task communications.
+    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, I>;
 
     /// Get the runtime this task is running in
     ///

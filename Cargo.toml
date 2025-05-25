@@ -22,7 +22,7 @@ uuid = "1.17.0"
 chrono = "0.4.41"
 num_cpus = "1.16.0"
 rayon = "1.10.0"
-rand = "0.9.1"
+rand = "0.8"
 crossterm = { version = "0.29" }
 ratatui = { version = "0.29" }
 clap = { version = "4.5", features = ["derive"] }
@@ -30,4 +30,10 @@ sweet_async = { path = "crates/sweet_async" }
 sweet_async_api = { path = "crates/api" }
 sweet_async_tokio = { path = "crates/tokio" }
 tokio-util = { version = "0.7.15", features = ["full"] }
+hostname = { version = "0.4" }
+# Encryption dependencies
+aead = { version = "0.5" }
+aes-gcm = { version = "0.10", features = ["std"] }
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+zeroize = { version = "1.8", features = ["derive"] }
 # sweet_async_async_std = { path = "crates/async-std" } # Uncomment when async-std variant is added

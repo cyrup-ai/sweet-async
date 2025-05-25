@@ -24,6 +24,13 @@ pub mod spawn;
 pub mod adaptive;
 pub mod async_util;
 pub mod async_work;
+pub mod vector_clock;
+pub mod task_envelope;
+
+// Implementation modules
+pub mod default_context;
+pub mod encryption;
+pub mod task_communication;
 
 // No re-exports - use the modules directly via their clean interfaces
 

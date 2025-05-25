@@ -1,8 +1,9 @@
 use std::future::Future;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicU8, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sweet_async_api::orchestra::OrchestratorError;
@@ -11,6 +12,7 @@ use sweet_async_api::task::{
     AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, CancellationLevel,
     ContextualizedTask, CpuUsage, IoUsage, MemoryUsage, MetricsEnabledTask, PrioritizedTask,
     RecoverableTask, StatusEnabledTask, TaskId, TaskPriority, TaskStatus, TimedTask, TracingTask,
+    TaskRelationships,
 };
 use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::SpawningTask;
@@ -22,24 +24,33 @@ use tokio::time::timeout;
 
 use crate::runtime::safe_blocking;
 
+/// Messages sent from spawned task back to AsyncTask
+enum TaskMessage<T> {
+    StatusUpdate(TaskStatus),
+    StartTime(SystemTime),
+    EndTime(SystemTime),
+    Result(Result<T, AsyncTaskError>),
+    MetricsUpdate { cpu_time: Duration },
+}
+
 /// Task metrics implementation for Tokio tasks
 /// Uses atomic values to avoid blocking when reading metrics
 pub struct TaskMetrics {
-    cpu_time_nanos: Arc<AtomicU64>,
-    memory_current: Arc<AtomicU64>,
-    memory_peak: Arc<AtomicU64>,
-    bytes_read: Arc<AtomicU64>,
-    bytes_written: Arc<AtomicU64>,
+    cpu_time_nanos: AtomicU64,
+    memory_current: AtomicU64,
+    memory_peak: AtomicU64,
+    bytes_read: AtomicU64,
+    bytes_written: AtomicU64,
 }
 
 impl TaskMetrics {
     pub fn new() -> Self {
         Self {
-            cpu_time_nanos: Arc::new(AtomicU64::new(0)),
-            memory_current: Arc::new(AtomicU64::new(0)),
-            memory_peak: Arc::new(AtomicU64::new(0)),
-            bytes_read: Arc::new(AtomicU64::new(0)),
-            bytes_written: Arc::new(AtomicU64::new(0)),
+            cpu_time_nanos: AtomicU64::new(0),
+            memory_current: AtomicU64::new(0),
+            memory_peak: AtomicU64::new(0),
+            bytes_read: AtomicU64::new(0),
+            bytes_written: AtomicU64::new(0),
         }
     }
 
@@ -78,11 +89,11 @@ impl TaskMetrics {
 impl Clone for TaskMetrics {
     fn clone(&self) -> Self {
         Self {
-            cpu_time_nanos: Arc::clone(&self.cpu_time_nanos),
-            memory_current: Arc::clone(&self.memory_current),
-            memory_peak: Arc::clone(&self.memory_peak),
-            bytes_read: Arc::clone(&self.bytes_read),
-            bytes_written: Arc::clone(&self.bytes_written),
+            cpu_time_nanos: AtomicU64::new(self.cpu_time_nanos.load(Ordering::Relaxed)),
+            memory_current: AtomicU64::new(self.memory_current.load(Ordering::Relaxed)),
+            memory_peak: AtomicU64::new(self.memory_peak.load(Ordering::Relaxed)),
+            bytes_read: AtomicU64::new(self.bytes_read.load(Ordering::Relaxed)),
+            bytes_written: AtomicU64::new(self.bytes_written.load(Ordering::Relaxed)),
         }
     }
 }
@@ -205,56 +216,59 @@ pub struct AsyncTask<T: Clone + Send + 'static, I: TaskId> {
     // Task priority
     priority: TaskPriority,
     // Task execution handle
-    handle: Arc<Mutex<Option<JoinHandle<Result<T, AsyncTaskError>>>>>,
+    handle: Option<JoinHandle<Result<T, AsyncTaskError>>>,
     // Cancellation sender
-    cancel_tx: Arc<Mutex<Option<oneshot::Sender<CancellationLevel>>>>,
+    cancel_tx: Option<oneshot::Sender<CancellationLevel>>,
+    // Channel receiver for task updates
+    update_rx: Option<mpsc::UnboundedReceiver<TaskMessage<T>>>,
     // Task status (atomic for sync access)
-    status: Arc<Mutex<TaskStatus>>,
-    atomic_status: Arc<AtomicU8>,
+    atomic_status: AtomicU8,
     // Task result (if available)
-    result: Arc<Mutex<Option<Result<T, AsyncTaskError>>>>,
+    result: Option<Result<T, AsyncTaskError>>,
     // Successful value storage (for value() method)
-    success_value: Arc<OnceCell<T>>,
+    success_value: OnceCell<T>,
     // Atomic result tracking for sync access
-    atomic_result_available: Arc<AtomicBool>,
-    atomic_result_success: Arc<AtomicBool>,
+    atomic_result_available: AtomicBool,
+    atomic_result_success: AtomicBool,
     // Task creation time
     created_time: SystemTime,
     // Task execution start time (atomic for sync access)
-    start_time: Arc<Mutex<Option<SystemTime>>>,
-    atomic_start_time: Arc<AtomicU64>, // nanos since UNIX_EPOCH
+    atomic_start_time: AtomicU64, // nanos since UNIX_EPOCH
     // Task completion time (atomic for sync access)
-    end_time: Arc<Mutex<Option<SystemTime>>>,
-    atomic_end_time: Arc<AtomicU64>, // nanos since UNIX_EPOCH
+    atomic_end_time: AtomicU64, // nanos since UNIX_EPOCH
     // Task timeout
     timeout: Duration,
     // Tokio runtime handle
     runtime: Handle,
-    // Active tasks registry for the runtime
-    active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    // Active tasks registry for the runtime - THIS IS THE ONLY ARC WE NEED
+    active_tasks: Arc<AtomicUsize>,
     // Task metrics
     metrics: TaskMetrics,
     // Fallback value
-    fallback: Arc<Mutex<Option<T>>>,
+    fallback: Option<T>,
     // Retry count
     retry_count: u8,
     // Current retry
-    current_retry: Arc<AtomicU8>,
+    current_retry: AtomicU8,
     // Cancellation callbacks
     cancel_callbacks:
-        Arc<Mutex<Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>>>,
+        Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
     // Tracing enabled
     tracing_enabled: bool,
     // Child tasks
-    child_tasks: Arc<Mutex<Vec<Box<dyn std::any::Any + Send + Sync>>>>,
+    child_tasks: Vec<Box<dyn std::any::Any + Send + Sync>>,
     // Parent task
-    parent: Arc<Mutex<Option<Box<dyn std::any::Any + Send + Sync>>>>,
+    parent: Option<Box<dyn std::any::Any + Send + Sync>>,
     // Atomic cancellation flag for quick checks
-    atomic_cancelled: Arc<AtomicBool>,
+    atomic_cancelled: AtomicBool,
     // Current working directory
     cwd: PathBuf,
     // Task name
-    name: Arc<Mutex<Option<String>>>,
+    name: Option<String>,
+    // Vector clock for distributed causality
+    vector_clock: crate::task::vector_clock::VectorClock<I>,
+    // Task relationships for channel-based communication
+    relationships: TaskRelationships<T, I>,
 }
 
 impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
@@ -262,71 +276,83 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
     pub fn task_id(&self) -> I {
         self.id
     }
+    
+    /// Get a reference to the vector clock
+    pub fn vector_clock(&self) -> &crate::task::vector_clock::VectorClock<I> {
+        &self.vector_clock
+    }
+    
+    /// Get a mutable reference to the vector clock
+    pub fn vector_clock_mut(&mut self) -> &mut crate::task::vector_clock::VectorClock<I> {
+        &mut self.vector_clock
+    }
+    
+    /// Tick the vector clock (increment our logical time)
+    pub fn tick_clock(&mut self) {
+        self.vector_clock.tick(&self.id, &self.hostname);
+    }
+    
+    /// Update vector clock from received message
+    pub fn update_clock_from(&mut self, other: &crate::task::vector_clock::VectorClock<I>) {
+        self.vector_clock.merge(other);
+        self.tick_clock();
+    }
+    
+    /// Process any pending update messages from the spawned task
+    fn process_updates(&mut self) {
+        if let Some(rx) = &mut self.update_rx {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    TaskMessage::StatusUpdate(status) => {
+                        self.update_status(status);
+                    }
+                    TaskMessage::StartTime(time) => {
+                        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+                        self.atomic_start_time.store(nanos, Ordering::Relaxed);
+                    }
+                    TaskMessage::EndTime(time) => {
+                        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+                        self.atomic_end_time.store(nanos, Ordering::Relaxed);
+                    }
+                    TaskMessage::Result(result) => {
+                        self.result = Some(result.clone());
+                        match result {
+                            Ok(ref value) => {
+                                let _ = self.success_value.set(value.clone());
+                                self.atomic_result_success.store(true, Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                self.atomic_result_success.store(false, Ordering::Relaxed);
+                            }
+                        }
+                        self.atomic_result_available.store(true, Ordering::Relaxed);
+                    }
+                    TaskMessage::MetricsUpdate { cpu_time } => {
+                        self.metrics.update_cpu_time(cpu_time);
+                    }
+                }
+            }
+        }
+    }
 
-    /// Helper to update both mutex and atomic status
+    /// Helper to update status
     fn update_status(&self, new_status: TaskStatus) {
-        let atomic_clone = Arc::clone(&self.atomic_status);
-        let status_clone = Arc::clone(&self.status);
-        
         // Update atomic immediately
-        atomic_clone.store(status_to_u8(&new_status), Ordering::Relaxed);
+        self.atomic_status.store(status_to_u8(&new_status), Ordering::Relaxed);
         
         // Update cancelled flag if needed
         if matches!(new_status, TaskStatus::Cancelled | TaskStatus::PendingCancellation) {
             self.atomic_cancelled.store(true, Ordering::Relaxed);
         }
-        
-        // Update mutex asynchronously
-        tokio::spawn(async move {
-            let mut status = status_clone.lock().await;
-            *status = new_status;
-        });
-    }
-    
-    /// Helper to update start time
-    fn update_start_time(&self, time: SystemTime) {
-        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-        self.atomic_start_time.store(nanos, Ordering::Relaxed);
-        
-        let start_clone = Arc::clone(&self.start_time);
-        tokio::spawn(async move {
-            let mut start = start_clone.lock().await;
-            *start = Some(time);
-        });
-    }
-    
-    /// Helper to update end time
-    fn update_end_time(&self, time: SystemTime) {
-        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-        self.atomic_end_time.store(nanos, Ordering::Relaxed);
-        
-        let end_clone = Arc::clone(&self.end_time);
-        tokio::spawn(async move {
-            let mut end = end_clone.lock().await;
-            *end = Some(time);
-        });
     }
 
-    pub fn update_result(&self, result: Result<T, AsyncTaskError>) {
-        let success = result.is_ok();
-        self.atomic_result_available.store(true, Ordering::Relaxed);
-        self.atomic_result_success.store(success, Ordering::Relaxed);
-        
-        tokio::spawn({
-            let result_mutex = Arc::clone(&self.result);
-            async move {
-                let mut result_guard = result_mutex.lock().await;
-                *result_guard = Some(result);
-            }
-        });
-    }
     
     /// Create a new AsyncTask with priority (alias for new)
     pub fn new_with_priority(
         id: I,
         priority: TaskPriority,
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
     ) -> Self {
         Self::new(id, priority, runtime, active_tasks)
     }
@@ -336,7 +362,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         id: I,
         priority: TaskPriority,
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
     ) -> Self {
         let (cancel_tx, _) = oneshot::channel();
         let created_time = SystemTime::now();
@@ -345,33 +371,36 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         Self {
             id,
             priority,
-            handle: Arc::new(Mutex::new(None)),
-            cancel_tx: Arc::new(Mutex::new(Some(cancel_tx))),
-            status: Arc::new(Mutex::new(TaskStatus::Pending)),
-            atomic_status: Arc::new(AtomicU8::new(status_to_u8(&TaskStatus::Pending))),
-            result: Arc::new(Mutex::new(None)),
-            success_value: Arc::new(OnceCell::new()),
-            atomic_result_available: Arc::new(AtomicBool::new(false)),
-            atomic_result_success: Arc::new(AtomicBool::new(false)),
+            handle: None,
+            cancel_tx: Some(cancel_tx),
+            update_rx: None, // Will be set when task is spawned
+            atomic_status: AtomicU8::new(status_to_u8(&TaskStatus::Pending)),
+            result: None,
+            success_value: OnceCell::new(),
+            atomic_result_available: AtomicBool::new(false),
+            atomic_result_success: AtomicBool::new(false),
             created_time,
-            start_time: Arc::new(Mutex::new(None)),
-            atomic_start_time: Arc::new(AtomicU64::new(0)), // 0 means not started
-            end_time: Arc::new(Mutex::new(None)),
-            atomic_end_time: Arc::new(AtomicU64::new(0)), // 0 means not ended
+            atomic_start_time: AtomicU64::new(0), // 0 means not started
+            atomic_end_time: AtomicU64::new(0), // 0 means not ended
             timeout: Duration::from_secs(0), // Default - no timeout
             runtime,
             active_tasks,
             metrics: TaskMetrics::new(),
-            fallback: Arc::new(Mutex::new(None)),
+            fallback: None,
             retry_count: 0,
-            current_retry: Arc::new(AtomicU8::new(0)),
-            cancel_callbacks: Arc::new(Mutex::new(Vec::new())),
+            current_retry: AtomicU8::new(0),
+            cancel_callbacks: Vec::new(),
             tracing_enabled: false,
-            child_tasks: Arc::new(Mutex::new(Vec::new())),
-            parent: Arc::new(Mutex::new(None)),
-            atomic_cancelled: Arc::new(AtomicBool::new(false)),
+            child_tasks: Vec::new(),
+            parent: None,
+            atomic_cancelled: AtomicBool::new(false),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            name: Arc::new(Mutex::new(None)),
+            name: None,
+            hostname: hostname::get()
+                .ok()
+                .and_then(|name| name.into_string().ok())
+                .unwrap_or_else(|| "unknown".to_string()),
+            vector_clock: crate::task::vector_clock::VectorClock::new(),
         }
     }
 
@@ -380,7 +409,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
         task: S,
         priority: TaskPriority,
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
     ) -> Self 
     where
         S: SpawningTask<T, I> + 'static,
@@ -401,54 +430,54 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
 
         let created_time = SystemTime::now();
         
+        // Create channel for task updates
+        let (update_tx, update_rx) = mpsc::unbounded_channel();
+        
         // Create the new task
         let mut new_task = Self {
             id,
             priority,
-            handle: Arc::new(Mutex::new(None)),
-            cancel_tx: Arc::new(Mutex::new(Some(cancel_tx))),
-            status: Arc::new(Mutex::new(TaskStatus::Pending)),
-            atomic_status: Arc::new(AtomicU8::new(status_to_u8(&TaskStatus::Pending))),
-            result: Arc::new(Mutex::new(None)),
-            success_value: Arc::new(OnceCell::new()),
-            atomic_result_available: Arc::new(AtomicBool::new(false)),
-            atomic_result_success: Arc::new(AtomicBool::new(false)),
+            handle: None,
+            cancel_tx: Some(cancel_tx),
+            update_rx: Some(update_rx),
+            atomic_status: AtomicU8::new(status_to_u8(&TaskStatus::Pending)),
+            result: None,
+            success_value: OnceCell::new(),
+            atomic_result_available: AtomicBool::new(false),
+            atomic_result_success: AtomicBool::new(false),
             created_time,
-            start_time: Arc::new(Mutex::new(None)),
-            atomic_start_time: Arc::new(AtomicU64::new(0)),
-            end_time: Arc::new(Mutex::new(None)),
-            atomic_end_time: Arc::new(AtomicU64::new(0)),
+            atomic_start_time: AtomicU64::new(0),
+            atomic_end_time: AtomicU64::new(0),
             timeout: Duration::from_secs(0),
             runtime: runtime.clone(),
             active_tasks: active_tasks.clone(),
             metrics: TaskMetrics::new(),
-            fallback: Arc::new(Mutex::new(None)),
+            fallback: None,
             retry_count: 0,
-            current_retry: Arc::new(AtomicU8::new(0)),
-            cancel_callbacks: Arc::new(Mutex::new(Vec::new())),
+            current_retry: AtomicU8::new(0),
+            cancel_callbacks: Vec::new(),
             tracing_enabled: false,
-            child_tasks: Arc::new(Mutex::new(Vec::new())),
-            parent: Arc::new(Mutex::new(None)),
-            atomic_cancelled: Arc::new(AtomicBool::new(false)),
+            child_tasks: Vec::new(),
+            parent: None,
+            atomic_cancelled: AtomicBool::new(false),
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            name: Arc::new(Mutex::new(None)),
+            name: None,
+            hostname: hostname::get()
+                .ok()
+                .and_then(|name| name.into_string().ok())
+                .unwrap_or_else(|| "unknown".to_string()),
+            vector_clock: crate::task::vector_clock::VectorClock::new(),
         };
 
         // Clone necessary state for the async task
-        let handle_cl = new_task.handle.clone();
-        let status_cl = new_task.status.clone();
-        let result_cl = new_task.result.clone();
-        let success_value_cl = new_task.success_value.clone();
-        let start_time_cl = new_task.start_time.clone();
-        let end_time_cl = new_task.end_time.clone();
         let active_tasks_cl = new_task.active_tasks.clone();
-        let metrics_cl = new_task.metrics.clone();
 
         // Spawn the task
         let task_handle = runtime.spawn(async move {
             // Update status to Running
-            *status_cl.lock().await = TaskStatus::Running;
-            *start_time_cl.lock().await = Some(SystemTime::now());
+            let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Running));
+            let start_time = SystemTime::now();
+            let _ = update_tx.send(TaskMessage::StartTime(start_time));
 
             let start = tokio::time::Instant::now();
             
@@ -457,38 +486,34 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
             
             // Update metrics
             let elapsed = start.elapsed();
-            metrics_cl.update_cpu_time(elapsed).await;
+            let _ = update_tx.send(TaskMessage::MetricsUpdate { cpu_time: elapsed });
             
             // Record end time
-            *end_time_cl.lock().await = Some(SystemTime::now());
+            let end_time = SystemTime::now();
+            let _ = update_tx.send(TaskMessage::EndTime(end_time));
             
-            // Update status and store result
+            // Update status and send result
             match &result {
-                Ok(value) => {
-                    *status_cl.lock().await = TaskStatus::Completed;
-                    let _ = success_value_cl.set(value.clone());
+                Ok(_) => {
+                    let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Completed));
                 }
                 Err(_) => {
-                    *status_cl.lock().await = TaskStatus::Cancelled;
+                    let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Cancelled));
                 }
             }
+            let _ = update_tx.send(TaskMessage::Result(result.clone()));
             
-            // Clean up completed task from active tasks list
-            {
-                let mut tasks = active_tasks_cl.lock().await;
-                tasks.retain(|handle| !handle.is_finished());
-            }
+            // Decrement active task count
+            active_tasks_cl.fetch_sub(1, Ordering::SeqCst);
             
             result
         });
 
         // Store the handle
-        {
-            tokio::spawn(async move {
-                let mut handle_guard = handle_cl.lock().await;
-                *handle_guard = Some(task_handle);
-            });
-        }
+        new_task.handle = Some(task_handle);
+        
+        // Increment active task count
+        new_task.active_tasks.fetch_add(1, Ordering::SeqCst);
 
         new_task
     }
@@ -665,7 +690,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> {
 
             // Update metrics
             let elapsed = start.elapsed();
-            metrics_cl.update_cpu_time(elapsed).await;
+            metrics_cl.update_cpu_time(elapsed);
 
             // Record end time
             *end_time_cl.lock().await = Some(SystemTime::now());
@@ -738,7 +763,7 @@ impl<T: Clone + Send + 'static, I: TaskId> Clone for AsyncTask<T, I> {
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
+impl<T: Clone + Send + 'static, I: TaskId + Unpin> Future for AsyncTask<T, I> {
     type Output = Result<T, AsyncTaskError>;
 
     fn poll(
@@ -746,36 +771,53 @@ impl<T: Clone + Send + 'static, I: TaskId> Future for AsyncTask<T, I> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = Pin::into_inner(self);
-        let future = this.runtime.spawn(async {
-            // Get the task result
-            let handle = {
-                let mut guard = this.handle.lock().await;
-                guard.take()
-            };
-
-            if let Some(handle) = handle {
-                match handle.await {
-                    Ok(result) => result,
-                    Err(e) => Err(AsyncTaskError::Failure(format!("Task join error: {}", e))),
-                }
-            } else {
-                Err(AsyncTaskError::Failure("Task not started".to_string()))
+        
+        // First check if we have a cached result
+        if let Ok(mut guard) = this.result.try_lock() {
+            if let Some(result) = guard.take() {
+                return std::task::Poll::Ready(result);
             }
-        });
+        }
+        
+        // Get the task handle
+        let handle_opt = {
+            let guard = this.handle.try_lock();
+            match guard {
+                Ok(mut g) => g.take(),
+                Err(_) => return std::task::Poll::Pending,
+            }
+        };
 
-        // Poll the future
-        let mut pinned = Box::pin(future);
-        pinned.as_mut().poll(cx)
+        if let Some(mut handle) = handle_opt {
+            // Poll the actual task
+            match Pin::new(&mut handle).poll(cx) {
+                std::task::Poll::Ready(result) => {
+                    let final_result = match result {
+                        Ok(r) => r,
+                        Err(e) => Err(AsyncTaskError::Failure(format!("Task join error: {}", e))),
+                    };
+                    
+                    // Cache the result - we can't clone AsyncTaskError, so cache and return
+                    std::task::Poll::Ready(final_result)
+                }
+                std::task::Poll::Pending => {
+                    // Put the handle back
+                    if let Ok(mut guard) = this.handle.try_lock() {
+                        *guard = Some(handle);
+                    }
+                    std::task::Poll::Pending
+                }
+            }
+        } else {
+            std::task::Poll::Ready(Err(AsyncTaskError::Failure("Task not started".to_string())))
+        }
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I> {
+impl<T: Clone + Send + Sync + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I> {
     async fn cancel(&self, level: CancellationLevel) -> Result<(), OrchestratorError> {
-        // Update status
-        {
-            let mut status = self.status.lock().await;
-            *status = TaskStatus::PendingCancellation;
-        }
+        // Update status atomically
+        self.atomic_status.store(TaskStatus::PendingCancellation as u8, Ordering::SeqCst);
 
         // Send cancellation signal
         let cancel_tx = {
@@ -800,10 +842,7 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I
         }
 
         // Update status
-        {
-            let mut status = self.status.lock().await;
-            *status = TaskStatus::Cancelled;
-        }
+        self.update_status(TaskStatus::Cancelled);
 
         // Execute cancellation callbacks
         let callbacks = {
@@ -910,14 +949,12 @@ impl<T: Clone + Send + 'static, I: TaskId> TracingTask<T> for AsyncTask<T, I> {
 impl<T: Clone + Send + 'static, I: TaskId> ContextualizedTask<T, I> for AsyncTask<T, I> {
     type RuntimeType = super::super::runtime::TokioRuntime;
 
-    fn child_tasks(&self) -> Vec<T> {
-        // In a real implementation, this would return the actual child tasks
-        Vec::new()
+    fn relationships(&self) -> &TaskRelationships<T, I> {
+        &self.relationships
     }
 
-    fn parent(&self) -> Option<T> {
-        // In a real implementation, this would return the parent task
-        None
+    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, I> {
+        &mut self.relationships
     }
 
     fn runtime(&self) -> &Self::RuntimeType {
@@ -996,7 +1033,7 @@ impl<T: Clone + Send + 'static, I: TaskId> MetricsEnabledTask<T> for AsyncTask<T
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I> {
+impl<T: Clone + Send + Sync + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I> {
     fn to<R: Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         use crate::builder::DefaultOrchestratorBuilder;
@@ -1010,7 +1047,7 @@ impl<T: Clone + Send + 'static, I: TaskId> ApiAsyncTask<T, I> for AsyncTask<T, I
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> SpawningTask<T, I>
+impl<T: Clone + Send + Sync + 'static, I: TaskId> SpawningTask<T, I>
     for AsyncTask<T, I>
 {
     type TaskResult = crate::task::spawn::TokioTaskResult<T>;

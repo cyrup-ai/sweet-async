@@ -3,7 +3,7 @@ use crate::task::emit::EmittingTask;
 use crate::task::task_id::TaskId;
 
 #[allow(dead_code)]
-pub trait EmittingTaskBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
     AsyncTaskBuilder
 {
     type SenderBuilder: SenderBuilder<T, C, E, I>;
@@ -14,7 +14,7 @@ pub trait EmittingTaskBuilder<T: Send + 'static, C: Send + 'static, E: Send + 's
 }
 
 #[allow(dead_code)]
-pub trait SenderBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;
     /// Sets the receiver for the sender builder.
     fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder
@@ -23,7 +23,7 @@ pub trait SenderBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static,
 }
 
 #[allow(dead_code)]
-pub trait ReceiverBuilder<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+pub trait ReceiverBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     type Task: EmittingTask<T, C, E, I>;
     fn run(self) -> Self::Task;
     fn await_result(

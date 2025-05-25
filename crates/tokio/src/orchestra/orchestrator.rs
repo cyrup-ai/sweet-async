@@ -22,10 +22,10 @@ use crate::task::async_task::{TaskMetrics, AsyncTask};
 /// Basic, thread-safe orchestrator for Tokio tasks.
 pub struct TokioOrchestrator<T, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
-    tasks: Arc<Mutex<HashMap<I, Arc<AsyncTask<T, I>>>>>,
+    tasks: Arc<Mutex<HashMap<I, AsyncTask<T, I>>>>,
     deps:  Arc<Mutex<HashMap<I, HashSet<I>>>>, // dependent -> deps
     groups: Arc<Mutex<HashMap<String, HashSet<I>>>>,
     pub(crate) runtime: TokioRuntime,
@@ -33,7 +33,7 @@ where
 
 impl<T, I> TokioOrchestrator<T, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
     pub fn new(runtime: TokioRuntime) -> Self {
@@ -69,11 +69,11 @@ type BoxFut<'a, O> = Pin<Box<dyn Future<Output = O> + Send + 'a>>;
 
 impl<T, I, Task> TaskOrchestrator<T, Task, I> for TokioOrchestrator<T, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Eq + Hash + Send + 'static,
     Task: ApiAsyncTask<T, I> + Into<AsyncTask<T, I>>,
 {
-    type RegisterTaskReturn = Arc<AsyncTask<T, I>>;
+    type RegisterTaskReturn = I; // Just return the task ID
 
     type StartTaskFuture   = BoxFut<'static, Result<T, AsyncTaskError>>;
     type StartAllFuture    = BoxFut<'static, Vec<(I, Result<T, AsyncTaskError>)>>;
@@ -83,19 +83,15 @@ where
     fn register_task(&self, task: Task) -> Self::RegisterTaskReturn {
         let tokio_task: AsyncTask<T, I> = task.into();
         let id = tokio_task.task_id();
-        let arc = Arc::new(tokio_task);
         
-        // Clone for async update
+        // Store the unawaited task
         let tasks_clone = Arc::clone(&self.tasks);
-        let arc_clone = arc.clone();
-        
-        // Spawn task to update the registry
         tokio::spawn(async move {
             let mut map = tasks_clone.lock().await;
-            map.insert(id, arc_clone);
+            map.insert(id, tokio_task);
         });
         
-        arc
+        id
     }
 
     fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError> {
@@ -159,9 +155,14 @@ where
             if !this.deps_satisfied(&id).await {
                 return Err(AsyncTaskError::InvalidState("Dependencies not met".into()));
             }
-            let task_opt = { this.tasks.lock().await.get(&id).cloned() };
+            // Take the task out of the map and await it
+            let task_opt = { 
+                let mut map = this.tasks.lock().await;
+                map.remove(&id)
+            };
+            
             if let Some(task) = task_opt {
-                // AsyncTask implements Future, so we just await it
+                // Simply await the task future
                 task.await
             } else {
                 Err(AsyncTaskError::Failure(format!("Task {} not found", id.to_string())))

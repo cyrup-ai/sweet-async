@@ -20,7 +20,7 @@ use crate::task::{TaskId, TaskPriority};
 ///
 /// By implementing AsyncTask, the Orchestra itself can be spawned as a task in another runtime,
 /// creating a powerful composable pattern for nested task management.
-pub trait Orchestra<T: Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:
+pub trait Orchestra<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:
     Runtime<T, I> + TaskOrchestrator<T, Task, I> + AsyncTask<T, I>
 {
     /// Initialize a new task execution context
@@ -35,7 +35,7 @@ pub trait Orchestra<T: Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:
     /// Returns statistics about task execution, including counts of completed,
     /// failed, and pending tasks, as well as average execution times.
     ///
-    type Stats: ExecutionStats + Send + 'static;
+    type Stats: ExecutionStats + Clone + Send + 'static;
     type StatsTask: AsyncTask<Self::Stats, I>;
     fn execution_stats(&self) -> Self::StatsTask;
 
@@ -86,7 +86,7 @@ pub trait ExecutionStats {
 
 /// Initial builder for setting the orchestrator before configuring the task
 pub trait OrchestratorBuilder<
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: crate::task::AsyncTask<T, I>,
     I: crate::task::TaskId,
 >

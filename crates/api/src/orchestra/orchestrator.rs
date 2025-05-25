@@ -32,7 +32,7 @@ pub enum OrchestratorError {
 ///
 /// The TaskOrchestrator trait provides high-level coordination between multiple
 /// AsyncTask instances, supporting dependencies, batching, and lifecycle management.
-pub trait TaskOrchestrator<T: Send + 'static, Task: AsyncTask<T, I>, I: TaskId> {
+pub trait TaskOrchestrator<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId> {
     type RegisterTaskReturn;
     type StartTaskFuture: Future<Output = Result<T, AsyncTaskError>> + Send;
     type StartAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;

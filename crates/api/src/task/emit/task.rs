@@ -8,7 +8,7 @@ use crate::task::spawn::into_async_result::IntoAsyncResult;
 use crate::task::task_id::TaskId;
 
 #[allow(dead_code)]
-pub trait SenderTask<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait SenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
     Send + 'static
 {
     type EmittingTaskType: EmittingTask<T, C, E, I>;
@@ -19,7 +19,7 @@ pub trait SenderTask<T: Send + 'static, C: Send + 'static, E: Send + 'static, I:
 }
 
 #[allow(dead_code)]
-pub trait ReceiverTask<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait ReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
     Send + 'static
 {
     type EmittingTaskType: EmittingTask<T, C, E, I>;
@@ -29,7 +29,7 @@ pub trait ReceiverTask<T: Send + 'static, C: Send + 'static, E: Send + 'static, 
         R: IntoAsyncResult<C, E> + Send + 'static;
 }
 
-pub trait EmittingTask<T: Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
     AsyncTask<T, I> + Send + 'static
 {
     type Final: FinalEvent<T, C, C>;

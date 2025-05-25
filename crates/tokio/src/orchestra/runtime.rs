@@ -129,7 +129,7 @@ impl TokioRuntime {
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
+impl<T: Clone + Send + Sync + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
     type SpawnedTask = AsyncTask<T, I>;
 
     fn spawn(

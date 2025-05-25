@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 rustc-args = ["--document-private-items"]
 
 [dependencies]
-sweet_async_api = { workspace = true, path = "../api" }
+sweet_async_api = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-stream = { workspace = true }
 futures-core = { workspace = true }
@@ -35,6 +35,17 @@ rayon = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 rand = { workspace = true }
 tokio-util = { workspace = true }
+hostname = { workspace = true }
+# Encryption dependencies (optional)
+aead = { workspace = true, optional = true }
+aes-gcm = { workspace = true, optional = true }
+chacha20poly1305 = { workspace = true, optional = true }
+zeroize = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable encryption support for task communication
+encryption = ["aead", "aes-gcm", "chacha20poly1305", "zeroize", "sweet_async_api/encryption"]
 
 [dev-dependencies]
 tokio-test = { workspace = true }

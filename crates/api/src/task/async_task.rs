@@ -10,7 +10,7 @@ use crate::task::{
 ///
 /// This trait provides the foundation for all specialized tasks,
 /// ensuring they maintain identity, priority, and consistent execution.
-pub trait AsyncTask<T: Send + 'static, I: crate::task::TaskId>:
+pub trait AsyncTask<T: Clone + Send + 'static, I: crate::task::TaskId>:
     PrioritizedTask<T>
     + CancellableTask<T>
     + TracingTask<T>
@@ -21,8 +21,8 @@ pub trait AsyncTask<T: Send + 'static, I: crate::task::TaskId>:
     + MetricsEnabledTask<T>
 {
     // For a Task resolving to an awaitable future
-    fn to<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
+    fn to<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
 
     // For a Task that sends and receives Stream events via channels
-    fn emits<R: Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
+    fn emits<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
 }

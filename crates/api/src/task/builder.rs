@@ -89,7 +89,7 @@ where
 
 /// Sender phase of the builder pattern for queue-based tasks
 pub trait SenderBuilder<
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     U: Send + 'static,
     E: Send + 'static,
     I: crate::task::task_id::TaskId,
@@ -122,7 +122,7 @@ pub trait SenderBuilder<
 }
 
 pub trait ReceiverBuilder<
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     U: Send + 'static,
     E: Send + 'static,
     I: crate::task::task_id::TaskId,

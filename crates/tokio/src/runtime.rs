@@ -24,7 +24,6 @@ pub struct TokioRuntime {
     pub(crate) handle: Handle,
     is_running: Arc<AtomicBool>,
     pub(crate) active_tasks: Arc<AtomicUsize>,
-    task_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl Clone for TokioRuntime {
@@ -34,7 +33,6 @@ impl Clone for TokioRuntime {
             handle: self.handle.clone(),
             is_running: self.is_running.clone(),
             active_tasks: self.active_tasks.clone(),
-            task_handles: self.task_handles.clone(),
         }
     }
 }
@@ -47,7 +45,6 @@ impl TokioRuntime {
             handle: Handle::current(),
             is_running: Arc::new(AtomicBool::new(true)),
             active_tasks: Arc::new(AtomicUsize::new(0)),
-            task_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
     
@@ -66,7 +63,6 @@ impl TokioRuntime {
             handle,
             is_running: Arc::new(AtomicBool::new(true)),
             active_tasks: Arc::new(AtomicUsize::new(0)),
-            task_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
     
@@ -76,7 +72,7 @@ impl TokioRuntime {
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> ApiRuntime<T, I> for TokioRuntime {
+impl<T: Clone + Send + Sync + 'static, I: TaskId> ApiRuntime<T, I> for TokioRuntime {
     type SpawnedTask = TokioAsyncTask<T, I>;
 
     fn spawn(
@@ -84,64 +80,15 @@ impl<T: Clone + Send + 'static, I: TaskId> ApiRuntime<T, I> for TokioRuntime {
         task: impl SpawningTask<T, I> + 'static,
         priority: TaskPriority,
     ) -> Self::SpawnedTask {
-        let active_tasks = self.active_tasks.clone();
-        let task_handles = self.task_handles.clone();
-        
-        // Create a new TokioAsyncTask
+        // Create a new TokioAsyncTask that wraps the SpawningTask's work
         let tokio_task = TokioAsyncTask::<T, I>::new_with_priority(
             task.task_id(),
             priority,
             self.handle.clone(),
-            task_handles.clone(),
+            self.active_tasks.clone(),
         );
         
-        // Increment active task count
-        active_tasks.fetch_add(1, Ordering::SeqCst);
-        
-        // Spawn the actual work
-        let task_id = task.task_id();
-        let task_result = tokio_task.result.clone();
-        let task_status = tokio_task.status.clone();
-        let active_tasks_clone = active_tasks.clone();
-        
-        let handle = self.handle.spawn(async move {
-            // Update status to Running
-            task_status.store(sweet_async_api::task::TaskStatus::Running as u8, Ordering::SeqCst);
-            
-            // Execute the task
-            let result = task.await;
-            
-            // Store the result
-            if let Ok(mut guard) = task_result.try_lock() {
-                *guard = Some(result.clone());
-            } else {
-                // If we can't get the lock immediately, spawn a task to update it
-                let task_result_clone = task_result.clone();
-                tokio::spawn(async move {
-                    let mut guard = task_result_clone.lock().await;
-                    *guard = Some(result);
-                });
-            }
-            
-            // Update status based on result
-            let status = if result.is_ok() {
-                sweet_async_api::task::TaskStatus::Completed
-            } else {
-                sweet_async_api::task::TaskStatus::Cancelled
-            };
-            task_status.store(status as u8, Ordering::SeqCst);
-            
-            // Decrement active task count
-            active_tasks_clone.fetch_sub(1, Ordering::SeqCst);
-        });
-        
-        // Store the join handle
-        let handles_clone = task_handles.clone();
-        tokio::spawn(async move {
-            let mut handles = handles_clone.lock().await;
-            handles.push(handle);
-        });
-        
+        // The actual work from SpawningTask will be executed when tokio_task is awaited
         tokio_task
     }
 
@@ -167,26 +114,22 @@ impl<T: Clone + Send + 'static, I: TaskId> ApiRuntime<T, I> for TokioRuntime {
         // Mark as not running
         self.is_running.store(false, Ordering::SeqCst);
         
-        // Get all task handles
-        let handles = {
-            let mut guard = self.task_handles.blocking_lock();
-            std::mem::take(&mut *guard)
-        };
-        
-        // Create a future that waits for all tasks
+        // Wait for active tasks to complete by checking the counter
+        // Create a future that checks if all tasks are done
+        let active_tasks = self.active_tasks.clone();
         let shutdown_future = async move {
             let timeout_fut = tokio::time::sleep(timeout);
-            let join_all = async {
-                for handle in handles {
-                    let _ = handle.await;
-                }
-            };
             
             tokio::select! {
                 _ = timeout_fut => {
                     Err(OrchestratorError::OperationFailed("Shutdown timeout reached".to_string()))
                 }
-                _ = join_all => {
+                _ = async {
+                    // Wait for all tasks to complete by checking the counter
+                    while active_tasks.load(Ordering::SeqCst) > 0 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                } => {
                     Ok(())
                 }
             }

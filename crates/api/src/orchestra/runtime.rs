@@ -12,7 +12,7 @@ use crate::task::{AsyncTaskError, TaskPriority};
 /// The Runtime trait provides an abstraction over different async runtimes
 /// (such as Tokio or the standard library) to enable consistent task management.
 ///
-pub trait Runtime<T: Send + 'static, I: crate::task::TaskId> {
+pub trait Runtime<T: Clone + Send + 'static, I: crate::task::TaskId> {
     /// Spawn a task with a specific priority
     ///
     /// Schedules a task for execution with an optional priority level.

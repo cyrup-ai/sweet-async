@@ -6,7 +6,7 @@ use crate::task::spawn::SpawningTask;
 use crate::task::spawn::into_async_result::IntoAsyncResult;
 use std::future::Future;
 
-pub trait SpawningTaskBuilder<T: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait SpawningTaskBuilder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>:
     AsyncTaskBuilder
 {
     type Task: SpawningTask<T, I>;

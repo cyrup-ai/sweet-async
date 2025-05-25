@@ -15,7 +15,7 @@ use std::future::Future;
 /// chained task execution, cancellation propagation, and resource
 /// lifecycle management.
 #[allow(dead_code)]
-pub trait SpawningTask<T: Send + 'static, I: crate::task::TaskId>:
+pub trait SpawningTask<T: Clone + Send + 'static, I: crate::task::TaskId>:
     AsyncTask<T, I> + Send + 'static
 {
     type OutputFuture: Future<Output = Self::TaskResult> + Send + 'static;
@@ -30,7 +30,7 @@ pub trait SpawningTask<T: Send + 'static, I: crate::task::TaskId>:
     /// Run a child task
     fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
     where
-        R: Send + 'static,
+        R: Clone + Send + 'static,
         Self: SpawningTask<R, I>;
 
     /// Wait for all child tasks to complete
@@ -46,6 +46,6 @@ pub trait SpawningTask<T: Send + 'static, I: crate::task::TaskId>:
     fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
     where
         F: AsyncWork<U> + Send + 'static,
-        U: Send + 'static,
+        U: Clone + Send + 'static,
         Self: SpawningTask<U, I>;
 }

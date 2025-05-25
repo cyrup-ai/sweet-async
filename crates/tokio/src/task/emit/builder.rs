@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use sweet_async_api::task::builder::{
-    AsyncTaskBuilder, AsyncWork, ReceiverStrategy, SenderStrategy,
+    AsyncTaskBuilder, AsyncWork, ReceiverStrategy, SenderStrategy, MinMax,
 };
 use sweet_async_api::task::emit::{EmittingTask, EmittingTaskBuilder as ApiEmittingTaskBuilder};
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
@@ -33,7 +33,7 @@ pub struct TokioEmittingTaskBuilder<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    EOverall: Send + Sync + 'static,
+    EOverall: Send + 'static,
     I: TaskId,
 > {
     /// Base builder with common configuration
@@ -52,14 +52,14 @@ impl<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    EOverall: Send + Sync + 'static,
+    EOverall: Send + 'static,
     I: TaskId,
 > TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
     /// Create a new emitting task builder
     pub fn new(runtime: Handle, active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>) -> Self {
         Self {
-            base_builder: TokioAsyncTaskBuilder::new(runtime.clone(), active_tasks.clone()),
+            base_builder: TokioAsyncTaskBuilder::new_with_runtime(runtime.clone(), active_tasks.clone()),
             runtime,
             active_tasks,
             priority: TaskPriority::Normal,
@@ -85,7 +85,7 @@ impl<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    EOverall: Send + Sync + 'static,
+    EOverall: Send + 'static,
     I: TaskId,
 > AsyncTaskBuilder for TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
@@ -213,6 +213,7 @@ impl<
         active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
         priority: TaskPriority,
         sender_work: impl AsyncWork<T> + Send + 'static,
+        strategy: SenderStrategy,
     ) -> Self {
         Self {
             base_builder,
@@ -224,7 +225,7 @@ impl<
                 let fut = work.run();
                 Box::pin(fut)
             }),
-            sender_strategy: SenderStrategy::Parallel,
+            sender_strategy: strategy,
             _marker: PhantomData,
         }
     }
@@ -233,7 +234,7 @@ impl<
 impl<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
-    EItem: Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
 > sweet_async_api::task::emit::builder::SenderBuilder<T, C, EItem, I> 
@@ -296,7 +297,7 @@ pub struct TokioEmittingTask<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
-    EOverall: Send + Sync + 'static,
+    EOverall: Send + 'static,
     I: TaskId,
 > {
     /// Task ID
@@ -325,8 +326,8 @@ pub struct TokioEmittingTask<
 impl<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
-    EItem: Clone + Send + Sync + 'static,
-    I: TaskId + Copy + Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
+    I: TaskId,
 > TokioEmittingTask<T, C, EItem, AsyncTaskError, I>
 {
     #[allow(clippy::too_many_arguments)]
@@ -384,7 +385,7 @@ impl<
                     }
                 }
                 SenderStrategy::Parallel { workers, rate_limit: _ } => {
-                    let semaphore = Arc::new(Semaphore::new(std::cmp::max(workers.min(), 1)));
+                    let semaphore = Arc::new(Semaphore::new(std::cmp::max(workers.0, 1)));
                     let mut sender_join_handles: Vec<JoinHandle<Result<(), AsyncTaskError>>> = Vec::new();
                     let mut processing_error: Option<AsyncTaskError> = None;
 
@@ -703,13 +704,22 @@ impl<
                 biased;
                 _ = receiver_task_cancel_rx => {
                     collector_token.cancel();
-                    let collected_map_on_cancel = local_collector.join().await;
-                    *final_result_for_receiver_task.lock().await = Some(Ok(collected_map_on_cancel.clone()));
+                    let collected_map_arc = local_collector.join().await;
+                    // Clone the HashMap contents
+                    let map_clone = {
+                        let guard = collected_map_arc.lock().unwrap();
+                        (*guard).clone()
+                    };
+                    *final_result_for_receiver_task.lock().await = Some(Ok(map_clone));
                     Err(AsyncTaskError::Cancelled)
                 }
-                collected_items_map_result = local_collector.join() => {
-                    *final_result_for_receiver_task.lock().await = Some(Ok(collected_items_map_result.clone()));
-                    Ok(collected_items_map_result)
+                collected_items_map_result_arc = local_collector.join() => {
+                    let map_clone = {
+                        let guard = collected_items_map_result_arc.lock().unwrap();
+                        (*guard).clone()
+                    };
+                    *final_result_for_receiver_task.lock().await = Some(Ok(map_clone.clone()));
+                    Ok(map_clone)
                 }
             }
         });
@@ -776,76 +786,10 @@ impl<
                     }
                 }
             } else {
-                let final_result_outcome = {
+                {
                     let guard = final_result_arc_clone.lock().await;
-                    guard.as_ref().map(|r| match r {
-                        Ok(map) => Ok(map.clone()),
-                        Err(e) => Err(AsyncTaskError::Failure(format!("{}", e))),
-                    })
-                };
-                match final_result_outcome {
-                    Some(Ok(collected_map_with_results)) => {
-                        let final_event = crate::task::emit::TokioFinalEvent::new(
-                            (),
-                            collected_map_with_results,
-                            task_id_for_final_event,
-                        );
-                        Ok(final_event)
-                    }
-                    Some(Err(async_task_error)) => Err(async_task_error),
-                    None => Err(AsyncTaskError::Failure(
-                        "Emitting task result unavailable and handle already taken/not set"
-                            .to_string(),
-                    )),
-                }
-            }
-        };
-
-        if overall_task_timeout > Duration::ZERO {
-            match tokio::time::timeout(overall_task_timeout, processing_future).await {
-                Ok(result_of_processing) => result_of_processing,
-                Err(_) => {
-                    {
-                        let mut fr_guard = final_result_arc_clone.lock().await;
-                        if fr_guard.is_none() || matches!(*fr_guard, Some(Ok(_))) {
-                            *fr_guard = Some(Err(AsyncTaskError::Timeout(overall_task_timeout)));
-                        }
-                    }
-                    Err(AsyncTaskError::Timeout(overall_task_timeout))
-                }
-            }
-        } else {
-            processing_future.await
-        }
-    }
-}
-
-impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    EItem: Clone + Send + Sync + 'static,
-    I: TaskId + Copy + Clone + Send + Sync + 'static,
-> TokioEmittingTask<T, C, EItem, AsyncTaskError, I>
-{
-    /// Waits for the emitting task to complete and returns a TokioFinalEvent or an error.
-    pub async fn await_final_event(
-        self,
-    ) -> Result<crate::task::emit::TokioFinalEvent<(), C, EItem, I>, AsyncTaskError> {
-        let task_id_for_final_event = self.id;
-        let overall_task_timeout = self.task_timeout;
-        let final_result_arc_clone = self.final_result.clone();
-        let receiver_handle_arc_clone = self.receiver_handle.clone();
-
-        let processing_future = async {
-            let receiver_jh_opt = {
-                let mut handle_guard = receiver_handle_arc_clone.lock().await;
-                handle_guard.take()
-            };
-
-            if let Some(receiver_jh) = receiver_jh_opt {
-                match receiver_jh.await {
-                    Ok(task_outcome_result) => match task_outcome_result {
-                        Ok(collected_map_with_results) => {
+                    match guard.as_ref() {
+                        Some(Ok(collected_map_with_results)) => {
                             let final_event = crate::task::emit::TokioFinalEvent::new(
                                 (),
                                 collected_map_with_results,
@@ -853,41 +797,12 @@ impl<
                             );
                             Ok(final_event)
                         }
-                        Err(async_task_error) => Err(async_task_error),
-                    },
-                    Err(join_error) => {
-                        let error_msg = format!("Receiver task join error: {}", join_error);
-                        {
-                            let mut fr_guard = final_result_arc_clone.lock().await;
-                            if fr_guard.is_none() {
-                                *fr_guard = Some(Err(AsyncTaskError::Failure(error_msg.clone())));
-                            }
-                        }
-                        Err(AsyncTaskError::Failure(error_msg))
+                        Some(Err(async_task_error)) => Err(AsyncTaskError::Failure(format!("Emitting task failed: {:?}", async_task_error))),
+                        None => Err(AsyncTaskError::Failure(
+                            "Emitting task result unavailable and handle already taken/not set"
+                                .to_string(),
+                        )),
                     }
-                }
-            } else {
-                let final_result_outcome = {
-                    let guard = final_result_arc_clone.lock().await;
-                    guard.as_ref().map(|r| match r {
-                        Ok(map) => Ok(map.clone()),
-                        Err(e) => Err(AsyncTaskError::Failure(format!("{}", e))),
-                    })
-                };
-                match final_result_outcome {
-                    Some(Ok(collected_map_with_results)) => {
-                        let final_event = crate::task::emit::TokioFinalEvent::new(
-                            (),
-                            collected_map_with_results,
-                            task_id_for_final_event,
-                        );
-                        Ok(final_event)
-                    }
-                    Some(Err(async_task_error)) => Err(async_task_error),
-                    None => Err(AsyncTaskError::Failure(
-                        "Emitting task result unavailable and handle already taken/not set"
-                            .to_string(),
-                    )),
                 }
             }
         };
@@ -911,8 +826,10 @@ impl<
     }
 }
 
+// Removed duplicate impl block - all methods are in the main impl block above
+
 // Implement core AsyncTask methods first (these are required by EmittingTask trait)
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId> AsyncTask<T, I>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId> AsyncTask<T, I>
     for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn to<R: Send + 'static, Task: AsyncTask<R, I> + 'static>()
@@ -928,7 +845,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     EmittingTask<T, C, EItem, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type Final = crate::task::emit::TokioFinalEvent<(), C, EItem, I>;
@@ -965,7 +882,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
 }
 
 // Implement all required AsyncTask supertraits
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::PrioritizedTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn priority(&self) -> &impl sweet_async_api::task::RankableByPriority {
@@ -973,7 +890,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::CancellableTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     async fn cancel(
@@ -1028,7 +945,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::TracingTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn handle_error(
@@ -1047,7 +964,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::TimedTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn created_timestamp(&self) -> std::time::SystemTime {
@@ -1067,7 +984,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::ContextualizedTask<T, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type RuntimeType = crate::runtime::TokioRuntime;
@@ -1089,7 +1006,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::StatusEnabledTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn status(&self) -> sweet_async_api::task::TaskStatus {
@@ -1101,7 +1018,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::RecoverableTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn recover(
@@ -1120,7 +1037,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>
     sweet_async_api::task::MetricsEnabledTask<T> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type Cpu = crate::task::async_task::TaskMetrics;
@@ -1140,7 +1057,7 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Clone + Send + Sync + 'static, I: TaskId>
+impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, I: TaskId>
     sweet_async_api::task::emit::builder::ReceiverBuilder<T, C, EItem, I> for TokioReceiverBuilder<T, C, EItem, I>
 {
     type Task = TokioEmittingTask<T, C, EItem, AsyncTaskError, I>;

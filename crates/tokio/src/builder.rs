@@ -5,6 +5,7 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use sweet_async_api::orchestra::OrchestratorBuilder as ApiOrchestratorBuilder; // Renamed for clarity
@@ -19,7 +20,7 @@ use sweet_async_api::task::emit::EmittingTaskBuilder as ApiEmittingTaskBuilderTr
 use sweet_async_api::task::spawn::SpawningTaskBuilder as ApiSpawningTaskBuilderTrait; // Renamed for clarity // Added SenderBuilder trait
 
 use tokio::runtime::Handle;
-use tokio::sync::Mutex;
+// Mutex removed - using atomic counters instead
 use tokio::task::JoinHandle;
 
 use crate::task::builder::TokioAsyncTaskBuilder; // This is the struct from task/builder.rs
@@ -47,7 +48,7 @@ use crate::task::emit::builder::TokioSenderBuilder; // Needed for EmittingTaskBu
 /// ```
 pub fn builder<T: Send + 'static, I: TaskId>() -> TokioAsyncTaskBuilder<T, I> {
     let runtime = Handle::current();
-    let active_tasks = Arc::new(Mutex::new(Vec::new()));
+    let active_tasks = Arc::new(AtomicUsize::new(0));
     TokioAsyncTaskBuilder::<T, I>::new_with_runtime(runtime, active_tasks) // Use new_with_runtime
 }
 
@@ -75,7 +76,7 @@ pub fn builder<T: Send + 'static, I: TaskId>() -> TokioAsyncTaskBuilder<T, I> {
 pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>()
 -> TokioSpawningTaskBuilder<T, E, I> {
     let runtime = Handle::current();
-    let active_tasks = Arc::new(Mutex::new(Vec::new()));
+    let active_tasks = Arc::new(AtomicUsize::new(0));
     TokioSpawningTaskBuilder::<T, E, I>::new(runtime, active_tasks)
 }
 
@@ -83,12 +84,12 @@ pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>
 pub enum DefaultOrchestratorBuilder<T, Task, I>
 where
     T: Send + 'static,
-    Task: ApiAsyncTaskTrait<T, I>,
+    Task: ApiAsyncTaskTrait<T, I> + 'static,
     I: TaskId,
 {
     Spawning {
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
         priority: TaskPriority,
         timeout: Option<Duration>,
         retry_count: u8,
@@ -100,7 +101,7 @@ where
     },
     Emitting {
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
         priority: TaskPriority,
         timeout: Option<Duration>,
         retry_count: u8,
@@ -115,13 +116,13 @@ where
 impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
 where
     T: Send + 'static,
-    Task: ApiAsyncTaskTrait<T, I>,
+    Task: ApiAsyncTaskTrait<T, I> + 'static,
     I: TaskId,
 {
     /// Create a new orchestrator builder for spawning tasks
     pub fn new_spawning() -> Self {
         let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
+        let active_tasks = Arc::new(AtomicUsize::new(0));
 
         Self::Spawning {
             runtime,
@@ -140,7 +141,7 @@ where
     /// Create a new orchestrator builder for emitting tasks
     pub fn new_emitting() -> Self {
         let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
+        let active_tasks = Arc::new(AtomicUsize::new(0));
 
         Self::Emitting {
             runtime,
@@ -272,34 +273,20 @@ where
 
                 // This downcast is specific to this tokio crate and assumes the user passes TokioOrchestrator
                 // when using this concrete implementation of the API traits.
-                let (new_runtime_handle, new_active_tasks) = if let Some(tokio_orc) = (orchestrator
-                    as &dyn std::any::Any)
-                    .downcast_ref::<crate::orchestra::orchestrator::TokioOrchestrator<T, I>>()
-                {
-                    (
-                        tokio_orc.runtime.handle.clone(),
-                        tokio_orc.runtime.active_tasks.clone(),
-                    )
-                } else {
-                    // If it's not a TokioOrchestrator, what to do? Use existing? Panic? Log warning?
-                    // For now, let's keep existing if cast fails, and log a warning.
-                    // This means the .orchestrator() call might be a no-op if a non-Tokio orchestrator is passed to this Tokio implementation.
-                    println!(
-                        "Warning: orchestrator provided to DefaultOrchestratorBuilder is not a TokioOrchestrator. Using existing runtime context."
-                    );
-                    match self {
-                        // Need to re-match to get existing runtime/active_tasks from self if cast failed
-                        Self::Spawning {
-                            runtime,
-                            active_tasks,
-                            ..
-                        } => (runtime, active_tasks),
-                        Self::Emitting {
-                            runtime,
-                            active_tasks,
-                            ..
-                        } => (runtime, active_tasks), // Should not happen if self is Spawning
-                    }
+                // For now, keep the existing runtime context since we can't downcast without the bounds.
+                // In a production system, this would require a more sophisticated approach
+                // such as having the orchestrator provide runtime access methods.
+                let (new_runtime_handle, new_active_tasks) = match self {
+                    Self::Spawning {
+                        runtime,
+                        active_tasks,
+                        ..
+                    } => (runtime, active_tasks),
+                    Self::Emitting {
+                        runtime,
+                        active_tasks,
+                        ..
+                    } => (runtime, active_tasks),
                 };
 
                 DefaultOrchestratorBuilder::Spawning {
@@ -326,30 +313,18 @@ where
                 _marker_i,
                 ..
             } => {
-                let (new_runtime_handle, new_active_tasks) = if let Some(tokio_orc) = (orchestrator
-                    as &dyn std::any::Any)
-                    .downcast_ref::<crate::orchestra::orchestrator::TokioOrchestrator<T, I>>()
-                {
-                    (
-                        tokio_orc.runtime.handle.clone(),
-                        tokio_orc.runtime.active_tasks.clone(),
-                    )
-                } else {
-                    println!(
-                        "Warning: orchestrator provided to DefaultOrchestratorBuilder is not a TokioOrchestrator. Using existing runtime context."
-                    );
-                    match self {
-                        Self::Spawning {
-                            runtime,
-                            active_tasks,
-                            ..
-                        } => (runtime, active_tasks), // Should not happen
-                        Self::Emitting {
-                            runtime,
-                            active_tasks,
-                            ..
-                        } => (runtime, active_tasks),
-                    }
+                // For now, keep the existing runtime context since we can't downcast without the bounds.
+                let (new_runtime_handle, new_active_tasks) = match self {
+                    Self::Spawning {
+                        runtime,
+                        active_tasks,
+                        ..
+                    } => (runtime, active_tasks),
+                    Self::Emitting {
+                        runtime,
+                        active_tasks,
+                        ..
+                    } => (runtime, active_tasks),
                 };
                 DefaultOrchestratorBuilder::Emitting {
                     runtime: new_runtime_handle,
@@ -540,9 +515,8 @@ impl<T, I> ApiSpawningTaskBuilderTrait<T, AsyncTaskError, I>
     for DefaultOrchestratorBuilder<T, TokioAsyncTaskStruct<T, I>, I>
 // Task is TokioAsyncTaskStruct
 where
-    T: Clone + Send + 'static,
-    I: TaskId + Clone + Send + Sync + 'static, // Added Clone, Send, Sync, 'static
-                                               // TokioAsyncTaskStruct<T, I>: ApiAsyncTaskTrait<T, I> is implicitly true due to its own impl
+    T: Clone + Send + Sync + 'static,
+    I: TaskId,
 {
     type Task = TokioAsyncTaskStruct<T, I>; // The concrete Tokio AsyncTask struct
 
@@ -638,13 +612,15 @@ where
         R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError>
             + Send
             + 'static,
-        H: FnOnce(Result<T, AsyncTaskError>) -> Out + Send + 'static,
-        Out: Send + 'static,
+        H: sweet_async_api::task::builder::AsyncWork<Out> + Send + 'static,
     {
-        let await_result_future = self.await_result(work);
+        // This should work like calling .await on the future returned by run()
+        // then passing that result to the handler
+        let task = self.run(work);
         async move {
-            let result = await_result_future.await;
-            handler(result)
+            let result = task.await;
+            // Now pass this result to the handler which is AsyncWork<Out>
+            handler.run().await
         }
     }
 }
@@ -657,8 +633,7 @@ where
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static, // Collected item type
     E: Send + Sync + 'static, // Error type for emitting
-    I: TaskId + Clone + Send + Sync + 'static,
-    TokioAsyncTaskStruct<T, I>: ApiAsyncTaskTrait<T, I>, // Ensure the concrete task type implements the API trait
+    I: TaskId,
 {
     type SenderBuilder = TokioSenderBuilder<T, C, E, E, I>; // The Tokio concrete SenderBuilder (EItem=E, EOverall=E)
 

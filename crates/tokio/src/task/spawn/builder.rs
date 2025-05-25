@@ -18,6 +18,7 @@ use crate::task::builder::TokioAsyncTaskBuilder;
 ///
 /// A SpawningTaskBuilder is used to create future-based tasks that
 /// execute once and return a result.
+#[derive(Clone)]
 pub struct TokioSpawningTaskBuilder<T, E, I>
 where
     T: Send + 'static,
@@ -127,7 +128,7 @@ where
 
 impl<T, E, I> SpawningTaskBuilder<T, E, I> for TokioSpawningTaskBuilder<T, E, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     E: std::fmt::Display + Send + 'static,
     I: TaskId,
     E: Into<AsyncTaskError> + From<AsyncTaskError>,
