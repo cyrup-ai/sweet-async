@@ -22,7 +22,7 @@ pub mod spawn;
 
 // Utility modules
 pub mod adaptive;
-pub mod async_util;
+pub mod adaptive_channel;
 pub mod async_work;
 pub mod vector_clock;
 pub mod task_envelope;
@@ -31,6 +31,7 @@ pub mod task_envelope;
 pub mod default_context;
 pub mod encryption;
 pub mod task_communication;
+pub mod distributed_comm;
 
 // No re-exports - use the modules directly via their clean interfaces
 

@@ -3,7 +3,7 @@
 //! This module provides the implementation for sending and receiving events in stream-based tasks.
 
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use futures::{Future, Sink, Stream};
@@ -15,7 +15,7 @@ pub struct TokioEventSender<T: Send + 'static> {
     /// Channel sender for events
     sender: Sender<T>,
     /// Flag indicating if the sender is closed
-    closed: Arc<Mutex<bool>>,
+    closed: AtomicBool,
 }
 
 impl<T: Send + 'static> TokioEventSender<T> {
@@ -23,13 +23,13 @@ impl<T: Send + 'static> TokioEventSender<T> {
     pub fn new(sender: Sender<T>) -> Self {
         Self {
             sender,
-            closed: Arc::new(Mutex::new(false)),
+            closed: AtomicBool::new(false),
         }
     }
 
     /// Send an event to the channel
     pub async fn send(&self, item: T) -> Result<(), tokio::sync::mpsc::error::SendError<T>> {
-        if *self.closed.lock().unwrap() {
+        if self.closed.load(Ordering::Relaxed) {
             return Err(tokio::sync::mpsc::error::SendError(item));
         }
         self.sender.send(item).await
@@ -37,8 +37,7 @@ impl<T: Send + 'static> TokioEventSender<T> {
 
     /// Close the sender
     pub fn close(&self) {
-        let mut closed = self.closed.lock().unwrap();
-        *closed = true;
+        self.closed.store(true, Ordering::SeqCst);
     }
 }
 
@@ -46,7 +45,7 @@ impl<T: Send + 'static> Clone for TokioEventSender<T> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
-            closed: self.closed.clone(),
+            closed: AtomicBool::new(self.closed.load(Ordering::Relaxed)),
         }
     }
 }

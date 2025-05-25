@@ -5,11 +5,12 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex, oneshot, Semaphore, mpsc};
+use tokio::sync::{oneshot, Semaphore, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ use sweet_async_api::task::builder::{
     AsyncTaskBuilder, AsyncWork, ReceiverStrategy, SenderStrategy, MinMax,
 };
 use sweet_async_api::task::emit::{EmittingTask, EmittingTaskBuilder as ApiEmittingTaskBuilder};
-use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
+use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority, TaskRelationships};
 
 use super::async_work_wrapper::BoxedAsyncWork;
 use super::event::{TokioEventSender, create_event_channel};
@@ -41,7 +42,7 @@ pub struct TokioEmittingTaskBuilder<
     /// Tokio runtime handle
     runtime: Handle,
     /// Active tasks registry
-    active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    active_tasks: Arc<AtomicUsize>,
     /// Task priority
     priority: TaskPriority,
     /// Type markers
@@ -57,7 +58,7 @@ impl<
 > TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
     /// Create a new emitting task builder
-    pub fn new(runtime: Handle, active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>) -> Self {
+    pub fn new(runtime: Handle, active_tasks: Arc<AtomicUsize>) -> Self {
         Self {
             base_builder: TokioAsyncTaskBuilder::new_with_runtime(runtime.clone(), active_tasks.clone()),
             runtime,
@@ -112,7 +113,7 @@ impl<
 
     fn new() -> Self {
         let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
+        let active_tasks = Arc::new(AtomicUsize::new(0));
         Self::new(runtime, active_tasks)
     }
 }
@@ -187,7 +188,7 @@ where
     /// Tokio runtime handle
     runtime: Handle,
     /// Active tasks registry
-    active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    active_tasks: Arc<AtomicUsize>,
     /// Task priority
     priority: TaskPriority,
     /// Event sender work function that produces a channel
@@ -210,7 +211,7 @@ impl<
     pub fn new(
         base_builder: TokioAsyncTaskBuilder<T, I>,
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
         priority: TaskPriority,
         sender_work: impl AsyncWork<T> + Send + 'static,
         strategy: SenderStrategy,
@@ -277,7 +278,7 @@ where
     /// Tokio runtime handle
     runtime: Handle,
     /// Active tasks registry
-    active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    active_tasks: Arc<AtomicUsize>,
     /// Task priority
     priority: TaskPriority,
     /// Event sender work function
@@ -304,17 +305,8 @@ pub struct TokioEmittingTask<
     id: I,
     /// Task priority
     priority: TaskPriority,
-    /// Sender task handle
-    sender_handle: Arc<Mutex<Option<JoinHandle<Result<(), AsyncTaskError>>>>>,
-    /// Receiver task handle
-    receiver_handle:
-        Arc<Mutex<Option<JoinHandle<Result<HashMap<Uuid, Result<C, EItem>>, AsyncTaskError>>>>>,
     /// Event sender
     event_sender: Arc<TokioEventSender<T>>,
-    /// Cancellation sender
-    cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
-    /// Final result from task completion
-    final_result: Arc<Mutex<Option<Result<HashMap<Uuid, Result<C, EItem>>, AsyncTaskError>>>>,
     /// Task metrics
     metrics: crate::task::async_task::TaskMetrics,
     /// Task timeout
@@ -340,18 +332,14 @@ impl<
         receiver_strategy: ReceiverStrategy,
         runtime: Handle,
         task_timeout_duration: Duration,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
     ) -> Self {
         let (internal_event_tx, internal_event_rx_for_collector) = create_event_channel::<T>(100);
         let (cancel_tx_main_oneshot, mut cancel_rx_for_sender) = oneshot::channel();
         let (_receiver_task_cancel_tx, receiver_task_cancel_rx) = oneshot::channel();
 
-        let sender_join_handle_arc = Arc::new(Mutex::new(None));
-        let receiver_join_handle_arc = Arc::new(Mutex::new(None));
-        let final_result_arc = Arc::new(Mutex::new(None));
 
         let runtime_for_sender = runtime.clone();
-        let sender_join_handle_for_storage = sender_join_handle_arc.clone();
         let internal_event_tx_for_sender_task = internal_event_tx.clone();
 
         // Spawn the sender task
@@ -661,32 +649,13 @@ impl<
             overall_sender_result
         });
 
-        {
-            let sender_handle_clone = original_sender_jh;
-            
-            tokio::spawn(async move {
-                *sender_join_handle_for_storage.lock().await = Some(sender_handle_clone);
-            });
-        }
 
-        let final_result_for_receiver_task = final_result_arc.clone();
         let runtime_for_receiver = runtime.clone();
-        let receiver_join_handle_for_storage = receiver_join_handle_arc.clone();
         
         // Create receiver function that uses the receiver work
-        let receiver_work_clone = Arc::new(Mutex::new(Some(receiver_work)));
         let receiver_fn = move |_t: &T, _: &mut (), _uuid: Uuid| -> Result<C, EItem> {
             // This is a simplified version - in reality we'd transform T to C
-            // For now, just use the receiver work to produce C
-            let work = receiver_work_clone.blocking_lock().take();
-            if let Some(w) = work {
-                let handle = Handle::current();
-                match handle.block_on(w.run()) {
-                    c => Ok(c),
-                }
-            } else {
-                Err(todo!()) // Convert to proper error
-            }
+            todo!("Need to properly transform T to C")
         };
 
         let original_receiver_jh: JoinHandle<Result<HashMap<Uuid, Result<C, EItem>>, AsyncTaskError>> = runtime_for_receiver.spawn(async move {
@@ -989,12 +958,12 @@ impl<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: 
 {
     type RuntimeType = crate::runtime::TokioRuntime;
 
-    fn child_tasks(&self) -> Vec<T> {
-        Vec::new()
+    fn relationships(&self) -> &TaskRelationships<T, I> {
+        unimplemented!("TokioEmittingTask does not currently support task relationships")
     }
 
-    fn parent(&self) -> Option<T> {
-        None
+    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, I> {
+        unimplemented!("TokioEmittingTask does not currently support task relationships")
     }
 
     fn runtime(&self) -> &Self::RuntimeType {

@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::{self, JoinHandle};
-use tokio::sync::Mutex;
 
 use sweet_async_api::orchestra::{OrchestratorError, runtime::Runtime as ApiRuntime};
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
@@ -22,7 +21,7 @@ use crate::task::async_task::TokioAsyncTask;
 pub struct TokioRuntime {
     runtime: Option<Runtime>,
     pub(crate) handle: Handle,
-    is_running: Arc<AtomicBool>,
+    is_running: AtomicBool,
     pub(crate) active_tasks: Arc<AtomicUsize>,
 }
 
@@ -31,7 +30,7 @@ impl Clone for TokioRuntime {
         Self {
             runtime: None, // Can't clone Runtime, so use None
             handle: self.handle.clone(),
-            is_running: self.is_running.clone(),
+            is_running: AtomicBool::new(self.is_running.load(Ordering::SeqCst)),
             active_tasks: self.active_tasks.clone(),
         }
     }
@@ -43,7 +42,7 @@ impl TokioRuntime {
         Self {
             runtime: None,
             handle: Handle::current(),
-            is_running: Arc::new(AtomicBool::new(true)),
+            is_running: AtomicBool::new(true),
             active_tasks: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -61,7 +60,7 @@ impl TokioRuntime {
         Self {
             runtime: Some(runtime),
             handle,
-            is_running: Arc::new(AtomicBool::new(true)),
+            is_running: AtomicBool::new(true),
             active_tasks: Arc::new(AtomicUsize::new(0)),
         }
     }

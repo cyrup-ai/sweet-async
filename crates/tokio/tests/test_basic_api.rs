@@ -1,7 +1,10 @@
 //! Basic API test to validate core functionality
 
-use crate::task::async_task::AsyncTask;
-use crate::UuidTaskId;
+mod common;
+
+use common::uuid_id;
+use sweet_async_tokio::task::async_task::AsyncTask;
+use sweet_async_tokio::UuidTaskId;
 use sweet_async_api::task::AsyncTask as ApiAsyncTask;
 use sweet_async_api::task::spawn::SpawningTaskBuilder;
 

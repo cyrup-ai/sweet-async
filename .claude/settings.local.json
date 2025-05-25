@@ -14,7 +14,9 @@
       "Bash(CARGO_INCREMENTAL=0 cargo check -v)",
       "Bash(CARGO_INCREMENTAL=0 cargo check)",
       "Bash(grep:*)",
-      "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio)"
+      "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio)",
+      "Bash(cargo nextest:*)",
+      "Bash(perl:*)"
     ],
     "deny": []
   }

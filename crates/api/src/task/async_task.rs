@@ -2,8 +2,8 @@ use crate::orchestra::OrchestratorBuilder;
 use crate::task::ContextualizedTask;
 
 use crate::task::{
-    CancellableTask, MetricsEnabledTask, PrioritizedTask, RecoverableTask, StatusEnabledTask,
-    TimedTask, TracingTask,
+    CancellableTask, DistributedTask, MetricsEnabledTask, NamedTask, PrioritizedTask, 
+    RecoverableTask, StatusEnabledTask, TimedTask, TracingTask,
 };
 
 /// Core trait for all asynchronous tasks
@@ -19,6 +19,8 @@ pub trait AsyncTask<T: Clone + Send + 'static, I: crate::task::TaskId>:
     + RecoverableTask<T>
     + StatusEnabledTask<T>
     + MetricsEnabledTask<T>
+    + NamedTask
+    + DistributedTask<I>
 {
     // For a Task resolving to an awaitable future
     fn to<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;

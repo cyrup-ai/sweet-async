@@ -83,7 +83,7 @@ pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>
 /// Orchestrator builder that can forward method calls
 pub enum DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: ApiAsyncTaskTrait<T, I> + 'static,
     I: TaskId,
 {
@@ -115,7 +115,7 @@ where
 
 impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: ApiAsyncTaskTrait<T, I> + 'static,
     I: TaskId,
 {
@@ -161,7 +161,7 @@ where
 // Implement ApiOrchestratorBuilder
 impl<T, Task, I> ApiOrchestratorBuilder<T, Task, I> for DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: ApiAsyncTaskTrait<T, I> + 'static,
     I: TaskId + 'static,
     // Adding bound that O (TaskOrchestrator) can provide runtime components
@@ -346,7 +346,7 @@ where
 // Implement ApiAsyncTaskBuilderTrait to allow method chaining directly on DefaultOrchestratorBuilder
 impl<T, Task, I> ApiAsyncTaskBuilderTrait for DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: ApiAsyncTaskTrait<T, I> + 'static, // Added 'static bound
     I: TaskId + 'static,                     // Added 'static bound
 {
@@ -516,7 +516,7 @@ impl<T, I> ApiSpawningTaskBuilderTrait<T, AsyncTaskError, I>
 // Task is TokioAsyncTaskStruct
 where
     T: Clone + Send + Sync + 'static,
-    I: TaskId,
+    I: TaskId + Unpin,
 {
     type Task = TokioAsyncTaskStruct<T, I>; // The concrete Tokio AsyncTask struct
 

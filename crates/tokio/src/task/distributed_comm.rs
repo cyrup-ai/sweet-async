@@ -49,7 +49,8 @@ impl<T: Clone + Send + 'static, I: TaskId> DistributedTaskComm<T, I> {
         if let Some(ref mut parent) = self.relationships.parent {
             // Convert to API envelope for sending
             parent.send(TaskMessage::Custom("vector_clock".to_string(), 
-                bincode::serialize(&envelope).map_err(|e| AsyncTaskError::Failure(e.to_string()))?
+                bincode::encode_to_vec(&envelope, bincode::config::standard())
+                    .map_err(|e| AsyncTaskError::Failure(e.to_string()))?
             )).await
         } else {
             Err(AsyncTaskError::InvalidState("No parent task".to_string()))
@@ -67,7 +68,7 @@ impl<T: Clone + Send + 'static, I: TaskId> DistributedTaskComm<T, I> {
             self.vector_clock.clone(),
         );
         
-        let serialized = bincode::serialize(&envelope)
+        let serialized = bincode::encode_to_vec(&envelope, bincode::config::standard())
             .map_err(|e| AsyncTaskError::Failure(e.to_string()))?;
             
         let mut errors = Vec::new();
@@ -98,14 +99,14 @@ impl<T: Clone + Send + 'static, I: TaskId> DistributedTaskComm<T, I> {
     }
     
     /// Get messages that happened before a specific envelope
-    pub fn get_messages_before(&self, envelopes: &[TaskEnvelopeExt<T, I>], target: &TaskEnvelopeExt<T, I>) -> Vec<&TaskEnvelopeExt<T, I>> {
+    pub fn get_messages_before<'a>(&self, envelopes: &'a [TaskEnvelopeExt<T, I>], target: &TaskEnvelopeExt<T, I>) -> Vec<&'a TaskEnvelopeExt<T, I>> {
         envelopes.iter()
             .filter(|env| env.happened_before(target))
             .collect()
     }
     
     /// Get concurrent messages
-    pub fn get_concurrent_messages(&self, envelopes: &[TaskEnvelopeExt<T, I>], target: &TaskEnvelopeExt<T, I>) -> Vec<&TaskEnvelopeExt<T, I>> {
+    pub fn get_concurrent_messages<'a>(&self, envelopes: &'a [TaskEnvelopeExt<T, I>], target: &TaskEnvelopeExt<T, I>) -> Vec<&'a TaskEnvelopeExt<T, I>> {
         envelopes.iter()
             .filter(|env| env.is_concurrent(target))
             .collect()

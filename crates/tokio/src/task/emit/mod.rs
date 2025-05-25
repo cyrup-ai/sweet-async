@@ -5,11 +5,16 @@
 // These modules are now available for use
 pub mod async_work_wrapper;
 pub mod builder;
+pub mod channel_builder;
 pub mod collector;
 pub mod event;
 
-pub use builder::{
-    TokioEmittingTask, TokioEmittingTaskBuilder, TokioReceiverBuilder, TokioSenderBuilder,
+// Use the channel-based implementations
+pub use channel_builder::{
+    ChannelEmittingTask as TokioEmittingTask, 
+    ChannelEmittingTaskBuilder as TokioEmittingTaskBuilder, 
+    ChannelReceiverBuilder as TokioReceiverBuilder, 
+    ChannelSenderBuilder as TokioSenderBuilder,
 };
 pub use collector::TokioEventCollector;
 pub use event::{TokioEvent, TokioEventReceiver, TokioEventSender};

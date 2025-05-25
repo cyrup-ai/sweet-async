@@ -1,0 +1,844 @@
+use std::future::Future;
+use std::net::IpAddr;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicU8, AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use sweet_async_api::orchestra::OrchestratorError;
+use sweet_async_api::orchestra::runtime::Runtime;
+use sweet_async_api::task::{
+    AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, CancellationLevel,
+    ContextualizedTask, CpuUsage, DistributedTask, IoUsage, MemoryUsage, MetricsEnabledTask, 
+    NamedTask, PrioritizedTask, RecoverableTask, RetryStrategy, StatusEnabledTask, TaskId, 
+    TaskPriority, TaskStatus, TimedTask, TracingTask, TaskRelationships, TaskEnvelope, 
+    TaskMessage as ApiTaskMessage,
+};
+use sweet_async_api::task::builder::AsyncWork;
+
+use tokio::runtime::Handle;
+use tokio::sync::{mpsc, oneshot, OnceCell};
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+
+use crate::runtime::safe_blocking;
+
+/// Messages sent from spawned task back to AsyncTask
+enum TaskMessage<T> {
+    StatusUpdate(TaskStatus),
+    StartTime(SystemTime),
+    EndTime(SystemTime),
+    Result(Result<T, AsyncTaskError>),
+    MetricsUpdate { cpu_time: Duration },
+}
+
+/// Task metrics implementation for Tokio tasks
+/// Uses atomic values to avoid blocking when reading metrics
+pub struct TaskMetrics {
+    cpu_time_nanos: AtomicU64,
+    memory_current: AtomicU64,
+    memory_peak: AtomicU64,
+    bytes_read: AtomicU64,
+    bytes_written: AtomicU64,
+}
+
+impl TaskMetrics {
+    pub fn new() -> Self {
+        Self {
+            cpu_time_nanos: AtomicU64::new(0),
+            memory_current: AtomicU64::new(0),
+            memory_peak: AtomicU64::new(0),
+            bytes_read: AtomicU64::new(0),
+            bytes_written: AtomicU64::new(0),
+        }
+    }
+
+    pub fn update_cpu_time(&self, additional: Duration) {
+        let additional_nanos = additional.as_nanos() as u64;
+        self.cpu_time_nanos.fetch_add(additional_nanos, Ordering::Relaxed);
+    }
+
+    pub fn update_memory(&self, current: u64) {
+        self.memory_current.store(current, Ordering::Relaxed);
+        
+        // Update peak if necessary
+        let mut peak = self.memory_peak.load(Ordering::Relaxed);
+        while current > peak {
+            match self.memory_peak.compare_exchange_weak(
+                peak,
+                current,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => peak = actual,
+            }
+        }
+    }
+
+    pub fn update_bytes_read(&self, additional: u64) {
+        self.bytes_read.fetch_add(additional, Ordering::Relaxed);
+    }
+
+    pub fn update_bytes_written(&self, additional: u64) {
+        self.bytes_written.fetch_add(additional, Ordering::Relaxed);
+    }
+}
+
+impl Clone for TaskMetrics {
+    fn clone(&self) -> Self {
+        Self {
+            cpu_time_nanos: AtomicU64::new(self.cpu_time_nanos.load(Ordering::Relaxed)),
+            memory_current: AtomicU64::new(self.memory_current.load(Ordering::Relaxed)),
+            memory_peak: AtomicU64::new(self.memory_peak.load(Ordering::Relaxed)),
+            bytes_read: AtomicU64::new(self.bytes_read.load(Ordering::Relaxed)),
+            bytes_written: AtomicU64::new(self.bytes_written.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+impl CpuUsage for TaskMetrics {
+    fn cpu_time(&self) -> Duration {
+        let nanos = self.cpu_time_nanos.load(Ordering::Relaxed);
+        Duration::from_nanos(nanos)
+    }
+
+    fn utilization(&self) -> f64 {
+        // For accurate CPU utilization, we would need more sophisticated tracking
+        // This is a simplified implementation
+        let cpu_time = self.cpu_time();
+        if cpu_time.as_secs() == 0 {
+            return 0.0;
+        }
+
+        // Estimate based on wall time vs CPU time
+        // This is a placeholder implementation
+        0.5
+    }
+
+    fn user_time(&self) -> Duration {
+        // Precise user/system split not available; return total cpu_time as
+        // user_time for now.
+        self.cpu_time()
+    }
+
+    fn system_time(&self) -> Duration {
+        // Without kernel vs user accounting, report zero system time.
+        Duration::from_secs(0)
+    }
+}
+
+impl MemoryUsage for TaskMetrics {
+    fn current_bytes(&self) -> u64 {
+        self.memory_current.load(Ordering::Relaxed)
+    }
+
+    fn peak_bytes(&self) -> u64 {
+        self.memory_peak.load(Ordering::Relaxed)
+    }
+
+    fn allocation_count(&self) -> u64 {
+        // Allocation tracking not yet instrumented – return 0.
+        0
+    }
+
+    fn allocation_rate(&self) -> f64 {
+        // Without allocation timestamps we cannot compute rate – return 0.0.
+        0.0
+    }
+}
+
+impl IoUsage for TaskMetrics {
+    fn bytes_read(&self) -> u64 {
+        self.bytes_read.load(Ordering::Relaxed)
+    }
+
+    fn bytes_written(&self) -> u64 {
+        self.bytes_written.load(Ordering::Relaxed)
+    }
+
+    fn read_operations(&self) -> u64 {
+        0
+    }
+
+    fn write_operations(&self) -> u64 {
+        0
+    }
+
+    fn read_latency(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+
+    fn write_latency(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+
+    fn operations_per_second(&self) -> f64 {
+        0.0
+    }
+
+    fn io_wait_time(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+}
+
+/// Helper to convert TaskStatus to u8 for atomic storage
+fn status_to_u8(status: &TaskStatus) -> u8 {
+    match status {
+        TaskStatus::Pending => 0,
+        TaskStatus::Running => 1,
+        TaskStatus::PendingCancellation => 2,
+        TaskStatus::Cancelled => 3,
+        TaskStatus::Completed => 4,
+    }
+}
+
+/// Helper to convert u8 to TaskStatus
+fn u8_to_status(val: u8) -> TaskStatus {
+    match val {
+        0 => TaskStatus::Pending,
+        1 => TaskStatus::Running,
+        2 => TaskStatus::PendingCancellation,
+        3 => TaskStatus::Cancelled,
+        4 => TaskStatus::Completed,
+        _ => TaskStatus::Pending,
+    }
+}
+
+/// Type alias for the Tokio implementation of AsyncTask with default error fallback
+pub type TokioAsyncTask<T, I> = AsyncTask<T, I, ErrorFallback<T>>;
+
+/// Default fallback that just returns the error
+pub struct ErrorFallback<T> {
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Clone + Send + 'static> AsyncWork<Result<T, AsyncTaskError>> for ErrorFallback<T> {
+    fn run(self) -> Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send + 'static>> {
+        Box::pin(async move {
+            Err(AsyncTaskError::Failure("Task failed with no recovery".to_string()))
+        })
+    }
+}
+
+impl<T> Default for ErrorFallback<T> {
+    fn default() -> Self {
+        Self { _phantom: std::marker::PhantomData }
+    }
+}
+
+/// A complete Tokio-based task implementation
+pub struct AsyncTask<T: Clone + Send + 'static, I: TaskId, F: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static = ErrorFallback<T>> {
+    // Core identity (required by traits)
+    id: I,
+    name: String,
+    
+    // Status (StatusEnabledTask)
+    atomic_status: AtomicU8,
+    
+    // Priority (PrioritizedTask)
+    priority: TaskPriority,
+    
+    // Timing (TimedTask)
+    created_time: SystemTime,
+    atomic_start_time: AtomicU64,
+    atomic_end_time: AtomicU64,
+    timeout: Duration,
+    
+    // Recovery (RecoverableTask)
+    fallback_work: F,
+    max_retries: u8,
+    current_retry: AtomicU8,
+    retry_strategy: RetryStrategy,
+    
+    // Metrics (MetricsEnabledTask)
+    #[cfg(feature = "metrics")]
+    metrics: TaskMetrics,
+    
+    // Tracing (TracingTask)  
+    #[cfg(feature = "tracing")]
+    tracing_enabled: bool,
+    
+    // Context (ContextualizedTask)
+    cwd: PathBuf,
+    relationships: TaskRelationships<T, I>,
+    
+    // Distribution (DistributedTask)
+    #[cfg(feature = "distributed")]
+    vector_clock: crate::task::vector_clock::VectorClock<I>,
+    
+    // Cancellation (CancellableTask)
+    atomic_cancelled: AtomicBool,
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I, F> {
+    /// Get the task ID
+    pub fn task_id(&self) -> I {
+        self.id
+    }
+    
+    /// Get a reference to the vector clock
+    pub fn vector_clock(&self) -> &crate::task::vector_clock::VectorClock<I> {
+        &self.vector_clock
+    }
+    
+    /// Get a mutable reference to the vector clock
+    pub fn vector_clock_mut(&mut self) -> &mut crate::task::vector_clock::VectorClock<I> {
+        &mut self.vector_clock
+    }
+    
+    /// Tick the vector clock (increment our logical time)
+    pub fn tick_clock(&mut self) {
+        let hostname = hostname::get().ok().and_then(|name| name.into_string().ok()).unwrap_or_else(|| "unknown".to_string());
+        self.vector_clock.tick(&self.id, &hostname);
+    }
+    
+    /// Update vector clock from received message
+    pub fn update_clock_from(&mut self, other: &crate::task::vector_clock::VectorClock<I>) {
+        self.vector_clock.merge(other);
+        self.tick_clock();
+    }
+    
+    /// Process any pending update messages from the spawned task
+    fn process_updates(&mut self) {
+        if let Some(rx) = &mut self.update_rx {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    TaskMessage::StatusUpdate(status) => {
+                        self.update_status(status);
+                    }
+                    TaskMessage::StartTime(time) => {
+                        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+                        self.atomic_start_time.store(nanos, Ordering::Relaxed);
+                    }
+                    TaskMessage::EndTime(time) => {
+                        let nanos = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+                        self.atomic_end_time.store(nanos, Ordering::Relaxed);
+                    }
+                    TaskMessage::Result(result) => {
+                        self.result = Some(result.clone());
+                        match result {
+                            Ok(ref value) => {
+                                let _ = self.success_value.set(value.clone());
+                                self.atomic_result_success.store(true, Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                self.atomic_result_success.store(false, Ordering::Relaxed);
+                            }
+                        }
+                        self.atomic_result_available.store(true, Ordering::Relaxed);
+                    }
+                    TaskMessage::MetricsUpdate { cpu_time } => {
+                        self.metrics.update_cpu_time(cpu_time);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Helper to update status
+    fn update_status(&self, new_status: TaskStatus) {
+        // Update atomic immediately
+        self.atomic_status.store(status_to_u8(&new_status), Ordering::Relaxed);
+        
+        // Update cancelled flag if needed
+        if matches!(new_status, TaskStatus::Cancelled | TaskStatus::PendingCancellation) {
+            self.atomic_cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    
+    /// Create a new AsyncTask with priority (alias for new)
+    pub fn new_with_priority(
+        id: I,
+        priority: TaskPriority,
+        runtime: Handle,
+        active_tasks: Arc<AtomicUsize>,
+    ) -> Self {
+        Self::new(id, priority, runtime, active_tasks)
+    }
+
+    /// Create a new AsyncTask directly with an ID and priority
+    pub fn new(
+        id: I,
+        priority: TaskPriority,
+        runtime: Handle,
+        active_tasks: Arc<AtomicUsize>,
+    ) -> Self {
+        let (cancel_tx, _) = oneshot::channel();
+        let created_time = SystemTime::now();
+
+        // Create the new task
+        Self {
+            id,
+            priority,
+            handle: None,
+            cancel_tx: Some(cancel_tx),
+            update_rx: None, // Will be set when task is spawned
+            atomic_status: AtomicU8::new(status_to_u8(&TaskStatus::Pending)),
+            result: None,
+            success_value: OnceCell::new(),
+            atomic_result_available: AtomicBool::new(false),
+            atomic_result_success: AtomicBool::new(false),
+            created_time,
+            atomic_start_time: AtomicU64::new(0), // 0 means not started
+            atomic_end_time: AtomicU64::new(0), // 0 means not ended
+            timeout: Duration::from_secs(0), // Default - no timeout
+            runtime,
+            metrics: TaskMetrics::new(),
+            fallback_work: ErrorFallback::default(),
+            retry_count: 0,
+            current_retry: AtomicU8::new(0),
+            cancel_callbacks: Vec::new(),
+            tracing_enabled: false,
+            atomic_cancelled: AtomicBool::new(false),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            name: None,
+            vector_clock: crate::task::vector_clock::VectorClock::new(),
+            relationships: TaskRelationships::new(),
+        }
+    }
+
+    /// Create a new AsyncTask from an existing SpawningTask
+    pub fn from_spawning_task<S>(
+        task: S,
+        priority: TaskPriority,
+        runtime: Handle,
+        active_tasks: Arc<AtomicUsize>,
+    ) -> Self 
+    where
+        S: SpawningTask<T, I> + 'static,
+    {
+        let id = task.task_id();
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+
+        // Create a future that will execute the SpawningTask
+        let task_future: Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send>> = 
+            Box::pin(async move {
+                // SpawningTask itself is a Future via AsyncTask
+                let task_as_async: Box<dyn ApiAsyncTask<T, I>> = Box::new(task);
+                match task_as_async.await {
+                    Ok(value) => Ok(value),
+                    Err(e) => Err(e),
+                }
+            });
+
+        let created_time = SystemTime::now();
+        
+        // Create channel for task updates
+        let (update_tx, update_rx) = mpsc::unbounded_channel();
+        
+        // Create the new task
+        let mut new_task = Self {
+            id,
+            priority,
+            handle: None,
+            cancel_tx: Some(cancel_tx),
+            update_rx: Some(update_rx),
+            atomic_status: AtomicU8::new(status_to_u8(&TaskStatus::Pending)),
+            result: None,
+            success_value: OnceCell::new(),
+            atomic_result_available: AtomicBool::new(false),
+            atomic_result_success: AtomicBool::new(false),
+            created_time,
+            atomic_start_time: AtomicU64::new(0),
+            atomic_end_time: AtomicU64::new(0),
+            timeout: Duration::from_secs(0),
+            runtime: runtime.clone(),
+            active_tasks: active_tasks.clone(),
+            metrics: TaskMetrics::new(),
+            fallback_work: ErrorFallback::default(),
+            retry_count: 0,
+            current_retry: AtomicU8::new(0),
+            cancel_callbacks: Vec::new(),
+            tracing_enabled: false,
+            atomic_cancelled: AtomicBool::new(false),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            name: None,
+            vector_clock: crate::task::vector_clock::VectorClock::new(),
+            relationships: TaskRelationships::new(),
+        };
+
+        // Clone necessary state for the async task
+
+        // Spawn the task
+        let task_handle = runtime.spawn(async move {
+            // Update status to Running
+            let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Running));
+            let start_time = SystemTime::now();
+            let _ = update_tx.send(TaskMessage::StartTime(start_time));
+
+            let start = tokio::time::Instant::now();
+            
+            // Execute the task future
+            let result = task_future.await;
+            
+            // Update metrics
+            let elapsed = start.elapsed();
+            let _ = update_tx.send(TaskMessage::MetricsUpdate { cpu_time: elapsed });
+            
+            // Record end time
+            let end_time = SystemTime::now();
+            let _ = update_tx.send(TaskMessage::EndTime(end_time));
+            
+            // Update status and send result
+            match &result {
+                Ok(_) => {
+                    let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Completed));
+                }
+                Err(_) => {
+                    let _ = update_tx.send(TaskMessage::StatusUpdate(TaskStatus::Cancelled));
+                }
+            }
+            let _ = update_tx.send(TaskMessage::Result(result.clone()));
+            
+            
+            result
+        });
+
+        // Store the handle
+        new_task.handle = Some(task_handle);
+        
+
+        new_task
+    }
+    pub fn with_timeout(mut self, duration: Duration) -> Self {
+        self.timeout = duration;
+        self
+    }
+
+    /// Set fallback work for the task
+    pub fn with_fallback<W>(self, work: W) -> AsyncTask<T, I, W>
+    where
+        W: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static + Clone
+    {
+        AsyncTask {
+            id: self.id,
+            priority: self.priority,
+            handle: self.handle,
+            cancel_tx: self.cancel_tx,
+            update_rx: self.update_rx,
+            atomic_status: self.atomic_status,
+            result: self.result,
+            success_value: self.success_value,
+            atomic_result_available: self.atomic_result_available,
+            atomic_result_success: self.atomic_result_success,
+            created_time: self.created_time,
+            atomic_start_time: self.atomic_start_time,
+            atomic_end_time: self.atomic_end_time,
+            timeout: self.timeout,
+            runtime: self.runtime,
+            metrics: self.metrics,
+            fallback_work: work,
+            retry_count: self.retry_count,
+            current_retry: self.current_retry,
+            cancel_callbacks: self.cancel_callbacks,
+            tracing_enabled: self.tracing_enabled,
+            atomic_cancelled: self.atomic_cancelled,
+            cwd: self.cwd,
+            name: self.name,
+            vector_clock: self.vector_clock,
+            relationships: self.relationships,
+        }
+    }
+
+    /// Set the retry count for the task
+    pub fn with_retry(mut self, count: u8) -> Self {
+        self.retry_count = count;
+        self
+    }
+
+    /// Enable or disable tracing for the task
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
+        self
+    }
+
+    /// Set a name for the task
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = Some(name);
+        self
+    }
+
+    /// Get the task name if set
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId, F: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static> Clone for AsyncTask<T, I, F> 
+where F: Clone {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            priority: self.priority,
+            handle: None,  // Handles cannot be cloned
+            cancel_tx: None,  // Cancellation is per-instance
+            update_rx: None,  // Update channel is per-instance
+            atomic_status: AtomicU8::new(self.atomic_status.load(Ordering::Relaxed)),
+            result: None,  // Result is per-instance
+            success_value: OnceCell::new(),  // Value is per-instance
+            atomic_result_available: AtomicBool::new(self.atomic_result_available.load(Ordering::Relaxed)),
+            atomic_result_success: AtomicBool::new(self.atomic_result_success.load(Ordering::Relaxed)),
+            created_time: self.created_time,
+            atomic_start_time: AtomicU64::new(self.atomic_start_time.load(Ordering::Relaxed)),
+            atomic_end_time: AtomicU64::new(self.atomic_end_time.load(Ordering::Relaxed)),
+            timeout: self.timeout,
+            runtime: self.runtime.clone(),
+            active_tasks: self.active_tasks.clone(),
+            metrics: self.metrics.clone(),
+            fallback_work: ErrorFallback::default(),  // Default fallback returns error
+            retry_count: self.retry_count,
+            current_retry: AtomicU8::new(self.current_retry.load(Ordering::Relaxed)),
+            cancel_callbacks: Vec::new(),  // Callbacks are per-instance
+            tracing_enabled: self.tracing_enabled,
+            atomic_cancelled: AtomicBool::new(self.atomic_cancelled.load(Ordering::Relaxed)),
+            cwd: self.cwd.clone(),
+            name: self.name.clone(),
+            vector_clock: self.vector_clock.clone(),
+            relationships: TaskRelationships::default(),  // Relationships are per-instance
+        }
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId + Unpin> Future for AsyncTask<T, I, F> {
+    type Output = Result<T, AsyncTaskError>;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.as_mut().get_mut();
+        
+        // Process any pending updates
+        this.process_updates();
+        
+        // Check if we have a result available atomically
+        if this.atomic_result_available.load(Ordering::Relaxed) {
+            if let Some(result) = this.result.take() {
+                return std::task::Poll::Ready(result);
+            }
+        }
+        
+        // Poll the handle if we have one
+        if let Some(handle) = &mut this.handle {
+            match Pin::new(handle).poll(cx) {
+                std::task::Poll::Ready(result) => {
+                    match result {
+                        Ok(r) => std::task::Poll::Ready(r),
+                        Err(e) => std::task::Poll::Ready(Err(AsyncTaskError::Failure(format!("Task join error: {}", e)))),
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        } else {
+            std::task::Poll::Ready(Err(AsyncTaskError::Failure("Task not started".to_string())))
+        }
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static, I: TaskId> CancellableTask<T> for AsyncTask<T, I, F> {
+    async fn cancel(&self, level: CancellationLevel) -> Result<(), OrchestratorError> {
+        // Mark as cancelled using atomics
+        self.atomic_status.store(status_to_u8(&TaskStatus::PendingCancellation), Ordering::SeqCst);
+        self.atomic_cancelled.store(true, Ordering::SeqCst);
+        
+        // The running task will see the atomic flag and stop itself
+        Ok(())
+    }
+
+    fn is_cancelled(&self) -> bool {
+        // First check atomic flag for quick return
+        if self.atomic_cancelled.load(Ordering::Relaxed) {
+            return true;
+        }
+        
+        // Then check atomic status
+        let status_val = self.atomic_status.load(Ordering::Relaxed);
+        let status = u8_to_status(status_val);
+        matches!(
+            status,
+            TaskStatus::Cancelled | TaskStatus::PendingCancellation
+        )
+    }
+
+    fn on_cancel<F, Fut>(&self, callback: F)
+    where
+        F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        // Spawn the callback to run immediately if already cancelled
+        if self.is_cancelled() {
+            tokio::spawn(async move {
+                callback.run().await;
+            });
+        }
+        // Otherwise callbacks need to be registered at task creation time
+    }
+
+    async fn cancel_gracefully(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::Graceful).await
+    }
+
+    async fn cancel_forcefully(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::Kill).await
+    }
+
+    async fn cancel_immediately(&self) -> Result<(), OrchestratorError> {
+        self.cancel(CancellationLevel::KillHard).await
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> TimedTask<T> for AsyncTask<T, I, F> {
+    fn created_timestamp(&self) -> SystemTime {
+        self.created_time
+    }
+
+    fn executed_timestamp(&self) -> SystemTime {
+        let nanos = self.atomic_start_time.load(Ordering::Relaxed);
+        if nanos == 0 {
+            self.created_time
+        } else {
+            UNIX_EPOCH + Duration::from_nanos(nanos)
+        }
+    }
+
+    fn completed_timestamp(&self) -> SystemTime {
+        let nanos = self.atomic_end_time.load(Ordering::Relaxed);
+        if nanos == 0 {
+            self.created_time
+        } else {
+            UNIX_EPOCH + Duration::from_nanos(nanos)
+        }
+    }
+
+    fn timeout(&self) -> Duration {
+        self.timeout
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> TracingTask<T> for AsyncTask<T, I, F> {
+    fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError> {
+        // In a real implementation, this would integrate with tracing systems
+        if self.tracing_enabled {
+            tracing::error!("Task error: {:?}", error);
+        }
+
+        Err(error)
+    }
+
+    fn record_error(&self, error: &AsyncTaskError) {
+        if self.tracing_enabled {
+            tracing::error!("Recording error: {:?}", error);
+        }
+    }
+
+    fn is_tracing_enabled(&self) -> bool {
+        self.tracing_enabled
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> ContextualizedTask<T, I> for AsyncTask<T, I, F> {
+    type RuntimeType = super::super::runtime::TokioRuntime;
+
+    fn relationships(&self) -> &TaskRelationships<T, I> {
+        &self.relationships
+    }
+
+    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, I> {
+        &mut self.relationships
+    }
+
+    fn runtime(&self) -> &Self::RuntimeType {
+        // Because AsyncTask doesn't currently store a reference to the TokioRuntime
+        // we need to panic with an informative message instead of returning a reference
+        panic!(
+            "ContextualizedTask::runtime is not directly available. Use AsyncTask::runtime_handle() instead."
+        )
+    }
+
+    fn cwd(&self) -> PathBuf {
+        self.cwd.clone()
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> StatusEnabledTask<T> for AsyncTask<T, I, F> {
+    fn status(&self) -> TaskStatus {
+        let status_val = self.atomic_status.load(Ordering::Relaxed);
+        u8_to_status(status_val)
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId, F: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static + Clone> RecoverableTask<T> for AsyncTask<T, I, F> {
+    type FallbackWork = F;
+    
+    async fn recover(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError> {
+        // Check if we have exhausted retries
+        let current_retry = self.current_retry.load(Ordering::Relaxed);
+        if current_retry < self.retry_count {
+            // Still have retries left - this would be handled by the orchestrator
+            return Err(error);
+        }
+        
+        // All retries exhausted, execute fallback work
+        // Clone the fallback work since run() consumes self
+        let fallback = self.fallback_work.clone();
+        fallback.run().await
+    }
+
+    fn can_recover_from(&self, _error: &AsyncTaskError) -> bool {
+        // Can recover if we have retries left
+        let current_retry = self.current_retry.load(Ordering::Relaxed);
+        current_retry < self.retry_count
+    }
+
+    fn fallback_work(&self) -> &Self::FallbackWork {
+        &self.fallback_work
+    }
+    
+    fn retry_count(&self) -> u8 {
+        self.retry_count
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> PrioritizedTask<T> for AsyncTask<T, I, F> {
+    fn priority(&self) -> &impl sweet_async_api::task::RankableByPriority {
+        &self.priority
+    }
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> MetricsEnabledTask<T> for AsyncTask<T, I, F> {
+    type Cpu = TaskMetrics;
+    type Memory = TaskMetrics;
+    type Io = TaskMetrics;
+
+    fn cpu_usage(&self) -> &Self::Cpu {
+        &self.metrics
+    }
+
+    fn memory_usage(&self) -> &Self::Memory {
+        &self.metrics
+    }
+
+    fn io_usage(&self) -> &Self::Io {
+        &self.metrics
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static, I: TaskId> ApiAsyncTask<T, I, F> for AsyncTask<T, I, F> {
+    fn to<R: Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
+    -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
+        use crate::builder::DefaultOrchestratorBuilder;
+        DefaultOrchestratorBuilder::<R, Task, I>::new_spawning()
+    }
+
+    fn emits<R: Send + 'static, Task: ApiAsyncTask<R, I> + 'static>()
+    -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
+        use crate::builder::DefaultOrchestratorBuilder;
+        DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
+    }
+}
+
+// SpawningTask implementation has been removed from base AsyncTask
+// It belongs on specialized task types created by the builder pattern

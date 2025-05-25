@@ -1,6 +1,7 @@
 pub mod builder;
 pub mod cancellable_task;
 pub mod default_context;
+pub mod distributed_task;
 pub mod emit;
 pub mod encryption;
 pub mod message_builder;
@@ -20,6 +21,7 @@ pub mod tracing_task;
 pub mod cpu_usage;
 pub mod io_usage;
 pub mod memory_usage;
+pub mod named_task;
 
 // Top-level task implementation
 pub mod async_task;
@@ -30,9 +32,11 @@ pub use async_task::*;
 pub use builder::*;
 pub use cancellable_task::*;
 pub use cpu_usage::*;
+pub use distributed_task::*;
 pub use encryption::*;
 pub use io_usage::*;
 pub use memory_usage::*;
+pub use named_task::*;
 pub use recoverable_task::*;
 pub use task_communication::*;
 pub use task_context::*;

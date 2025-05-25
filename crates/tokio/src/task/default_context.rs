@@ -1,9 +1,9 @@
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use sweet_async_api::task::{ContextualizedTask, TaskId, TaskRelationships};
-use sweet_async_api::orchestra::Runtime;
-use crate::TaskIdUuid;
+use sweet_async_api::task::{AsyncTask, ContextualizedTask, TaskId, TaskRelationships};
+use sweet_async_api::orchestra::runtime::Runtime;
+use crate::UuidTaskId;
 
 /// Default implementation of task context
 ///
@@ -70,8 +70,8 @@ impl Default for DefaultTaskContext {
 /// Example task type that uses DefaultTaskContext
 pub struct TaskWithDefaultContext<T: Clone + Send + 'static> {
     context: DefaultTaskContext,
-    relationships: TaskRelationships<T, TaskIdUuid>,
-    runtime: Option<Box<dyn Runtime<T, TaskIdUuid>>>,
+    relationships: TaskRelationships<T, UuidTaskId>,
+    runtime: Option<Box<dyn Runtime<T, UuidTaskId, SpawnedTask = Box<dyn AsyncTask<T, UuidTaskId>>>>>,
 }
 
 impl<T: Clone + Send + 'static> TaskWithDefaultContext<T> {
@@ -84,14 +84,14 @@ impl<T: Clone + Send + 'static> TaskWithDefaultContext<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> ContextualizedTask<T, TaskIdUuid> for TaskWithDefaultContext<T> {
-    type RuntimeType = Box<dyn Runtime<T, TaskIdUuid>>;
+impl<T: Clone + Send + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
+    type RuntimeType = Box<dyn Runtime<T, UuidTaskId>>;
     
-    fn relationships(&self) -> &TaskRelationships<T, TaskIdUuid> {
+    fn relationships(&self) -> &TaskRelationships<T, UuidTaskId> {
         &self.relationships
     }
     
-    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, TaskIdUuid> {
+    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, UuidTaskId> {
         &mut self.relationships
     }
     
@@ -103,11 +103,4 @@ impl<T: Clone + Send + 'static> ContextualizedTask<T, TaskIdUuid> for TaskWithDe
         self.context.cwd.clone()
     }
     
-    fn hostname(&self) -> String {
-        self.context.hostname.clone()
-    }
-    
-    fn ipaddr(&self) -> IpAddr {
-        self.context.ipaddr
-    }
 }
