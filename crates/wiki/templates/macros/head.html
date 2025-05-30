@@ -1,0 +1,65 @@
+{% macro title(page_title="") %}
+<title>
+  {% if page_title %}
+  {{ page_title }} &middot; {{ config.title }}
+  {% elif page.title %}
+  {{ page.title }} &middot; {{ config.title }}
+  {% elif section.title %}
+  {{ section.title }} &middot; {{ config.title }}
+  {% else %}
+  {{ config.title }} &middot; {{ config.description }}
+  {% endif %}
+</title>
+{% endmacro title %}
+
+{% macro social_meta(title="", description="", image="") %}
+{% set meta_title = title | default(value=page.title) | default(value=section.title) | default(value=config.title) %}
+{% set meta_desc = description | default(value=page.description) | default(value=section.description) | default(value=config.description) %}
+{% set meta_image = image | default(value="assets/img/og-image.jpg") %}
+{% set meta_url = current_url | default(value=page.permalink) | default(value=section.permalink) | default(value=config.base_url) %}
+
+<!-- Primary Meta Tags -->
+<meta name="title" content="{{ meta_title }}">
+<meta name="description" content="{{ meta_desc }}">
+
+<!-- Open Graph / Facebook / LinkedIn -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ meta_url }}">
+<meta property="og:title" content="{{ meta_title }}">
+<meta property="og:description" content="{{ meta_desc }}">
+<meta property="og:image" content="{{ get_url(path=meta_image, trailing_slash=false) | safe }}">
+<meta property="og:image:secure_url" content="{{ get_url(path=meta_image, trailing_slash=false) | safe }}">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{{ meta_title }}">
+<meta property="og:site_name" content="{{ config.title }}">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter/X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@sweetasyncrs">
+<meta name="twitter:creator" content="@kloudsamurai">
+<meta name="twitter:url" content="{{ meta_url }}">
+<meta name="twitter:title" content="{{ meta_title }}">
+<meta name="twitter:description" content="{{ meta_desc }}">
+<meta name="twitter:image" content="{{ get_url(path=meta_image, trailing_slash=false) | safe }}">
+<meta name="twitter:image:alt" content="{{ meta_title }}">
+
+<!-- Additional Images for Different Platforms -->
+<meta property="og:image" content="{{ get_url(path="assets/img/og-image-square.jpg", trailing_slash=false) | safe }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="1200">
+
+<!-- Schema.org for Google -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "{{ config.title }}",
+  "description": "{{ meta_desc }}",
+  "url": "{{ config.base_url }}",
+  "image": "{{ get_url(path=meta_image, trailing_slash=false) | safe }}"
+}
+</script>
+{% endmacro social_meta %}

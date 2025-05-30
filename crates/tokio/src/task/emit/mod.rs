@@ -11,8 +11,8 @@ pub mod event;
 
 // Use the channel-based implementations
 pub use channel_builder::{
-    ChannelEmittingTask as TokioEmittingTask, 
-    ChannelEmittingTaskBuilder as TokioEmittingTaskBuilder, 
+    TokioEmittingTask, 
+    TokioEmittingTaskBuilder, 
     ChannelReceiverBuilder as TokioReceiverBuilder, 
     ChannelSenderBuilder as TokioSenderBuilder,
 };

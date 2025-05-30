@@ -90,10 +90,10 @@ impl<T: Send + 'static> TaskResult<T> for TokioAsyncResult<T> {
 }
 
 impl<T: Send + 'static> AsyncResult<T> for TokioAsyncResult<T> {
-    type AndThenFuture<U: Send + 'static> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
-    type AndThenResult<U: Send + 'static> = TokioTaskResult<U>;
+    type AndThenFuture<U> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
+    type AndThenResult<U> = TokioTaskResult<U>;
     type OrElseFuture = Pin<Box<dyn Future<Output = Self> + Send + 'static>>;
-    type MapResult<U: Send + 'static> = TokioAsyncResult<U>;
+    type MapResult<U> = TokioAsyncResult<U>;
     type MapErrResult = TokioAsyncResult<T>;
 
     fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>

@@ -2,6 +2,14 @@
 default:
     @just --list
 
+# Alias for docs-all
+docs:
+    @just docs-all
+
+# Alias for docs-wiki
+wiki:
+    @just docs-wiki
+
 doc:
     cargo doc --workspace --all-features --no-deps --message-format short --quiet
 
@@ -37,6 +45,13 @@ install:
 
 # ───────────────────────── Documentation ─────────────────────────
 
+# Generate wiki documentation with Zola
+docs-wiki:
+    @echo "Generating wiki documentation..."
+    @if ! command -v zola &> /dev/null; then echo "Zola is not installed. Please install it from https://www.getzola.org/"; exit 1; fi
+    @cd crates/wiki && zola build
+    @echo "✅ Wiki documentation generated in crates/wiki/public/"
+
 # Generate beautiful API documentation
 docs-api:
     @echo "Generating API documentation..."
@@ -64,7 +79,7 @@ docs-workspace:
     @echo "✅ Workspace documentation generated in docs/generated/workspace/"
 
 # Generate all documentation
-docs-all: docs-api docs-guide docs-workspace
+docs-all: docs-api docs-guide docs-workspace docs-wiki
     @echo "✅ All documentation generated successfully"
 
 # Generate documentation from OpenTelemetry schema files

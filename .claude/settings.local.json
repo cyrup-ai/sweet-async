@@ -17,8 +17,29 @@
       "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio)",
       "Bash(cargo nextest:*)",
       "Bash(perl:*)",
-      "mcp__server-sequential-thinking__sequentialthinking"
+      "mcp__server-sequential-thinking__sequentialthinking",
+      "Bash(zola serve:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "WebFetch(domain:www.getzola.org)",
+      "Bash(chmod:*)",
+      "Bash(./generate-images-list.sh:*)",
+      "Bash(cat:*)",
+      "Bash(touch:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:docs.rig.rs)",
+      "WebFetch(domain:github.com)",
+      "Bash(tree-sitter:*)",
+      "Bash(brew search:*)",
+      "Bash(ast-grep:*)",
+      "Bash(rustc:*)",
+      "Bash(./generate_plan.sh:*)",
+      "WebFetch(domain:ast-grep.github.io)",
+      "Bash(diff:*)",
+      "Bash(jq:*)",
+      "Bash(comm:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": false
 }

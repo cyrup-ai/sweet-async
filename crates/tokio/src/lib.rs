@@ -1,37 +1,13 @@
-pub mod builder;
-pub mod duration_ext;
 pub mod orchestra;
 pub mod runtime;
 pub mod task;
+pub mod task_id_uuid;
 
 
 // Re-export core components
-pub use duration_ext::DurationExt;
 pub use runtime::TokioRuntime;
 pub use runtime::safe_blocking;
-
-use sweet_async_api::task::TaskId;
-
-// Implement TaskId for uuid::Uuid
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UuidTaskId(pub uuid::Uuid);
-
-impl TaskId for UuidTaskId {
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
-    fn from_string(s: &str) -> Option<Self> {
-        uuid::Uuid::parse_str(s).ok().map(UuidTaskId)
-    }
-}
-
-// Add AsRef<Uuid> implementation for UuidTaskId
-impl AsRef<uuid::Uuid> for UuidTaskId {
-    fn as_ref(&self) -> &uuid::Uuid {
-        &self.0
-    }
-}
+pub use task_id_uuid::*;
 
 /// Create a new Tokio runtime using the current handle
 pub fn new_runtime() -> TokioRuntime {

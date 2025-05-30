@@ -1,0 +1,24 @@
+<div class="share-widget">
+    <span class="share-label">Share:</span>
+    <a href="https://twitter.com/intent/tweet?url={{ current_url | urlencode }}&text={{ page.title | default(value=section.title) | default(value=config.title) | urlencode }}" 
+       target="_blank" 
+       rel="noopener noreferrer"
+       class="share-link"
+       aria-label="Share on Twitter">
+        <i class="fab fa-twitter"></i>
+    </a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ current_url | urlencode }}" 
+       target="_blank" 
+       rel="noopener noreferrer"
+       class="share-link"
+       aria-label="Share on LinkedIn">
+        <i class="fab fa-linkedin"></i>
+    </a>
+    <a href="https://github.com/sweet-async/sweet-async" 
+       target="_blank" 
+       rel="noopener noreferrer"
+       class="share-link"
+       aria-label="Star on GitHub">
+        <i class="fab fa-github"></i>
+    </a>
+</div>

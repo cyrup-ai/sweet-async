@@ -1,0 +1,884 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+        &self,
+        &self,
+        C: Future<Output = ()> + Send + 'static,
+        Coll: Default + Send + 'static;
+        F: AsyncWork<AsyncTaskError> + Send + 'static;
+        F: AsyncWork<C> + Send + 'static,
+        F: AsyncWork<Fut> + Send + 'static,
+        F: AsyncWork<Fut> + Send + 'static,
+        F: AsyncWork<R> + Send + 'static,
+        F: AsyncWork<R> + Send + 'static,
+        F: AsyncWork<R> + Send + 'static,
+        F: AsyncWork<U> + Send + 'static,
+        F: AsyncWork<U> + Send + 'static,
+        F: crate::task::builder::AsyncWork<C> + Send + 'static;
+        F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
+        F: crate::task::builder::AsyncWork<T> + Send + 'static;
+        F: Fn(/* ... */) -> R + Send + 'static,
+        F: Fn(/* ... */) -> R + Send + 'static,
+        F: Future<Output = R> + Send,
+        Fut: Future<Output = ()> + Send + 'static;
+        Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,
+        Fut: Future<Output = Self> + Send + 'static;
+        H: AsyncWork<Out> + Send + 'static;
+        handler: H,
+        K: Into<Uuid>;
+        level: CancellationLevel,
+        orchestrator: &O,
+        priority: TaskPriority,
+        processor: F,
+        R: Clone + Send + 'static,
+        R: IntoAsyncResult<C, E> + Send + 'static;
+        R: IntoAsyncResult<C, E> + Send + 'static;
+        R: IntoAsyncResult<T, E> + Send + 'static,
+        R: IntoAsyncResult<T, E> + Send + 'static;
+        R: IntoAsyncResult<T, E> + Send + 'static;
+        R: Send + 'static;
+        receiver: fn(&T, &mut (), Uuid) -> U,
+        S: Stream + Send + 'static,
+        S::Item: ReceiverEvent<T, C>,
+        self,
+        self,
+        self,
+        self,
+        self,
+        Self: Sized;
+        Self: Sized;
+        Self: Sized;
+        Self: Sized;
+        Self: SpawningTask<R, I>;
+        Self: SpawningTask<U, I>;
+        self.current_retry() >= self.max_retries()
+        strategy: ReceiverStrategy,
+        strategy: ReceiverStrategy,
+        task: impl crate::task::spawn::SpawningTask<T, I> + 'static,
+        U: Clone + Send + 'static,
+        U: Send + 'static;
+        U: Send + 'static;
+        work: F,
+    ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send;
+    ) -> impl Future<Output = Out> + Send
+    ) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+    ) -> Self::Next;
+    ) -> Self::Receiver;
+    ) -> Self::SpawnedTask;
+    ) -> Self::StreamProcessorReceiver<C, Coll>
+    }
+    // Add more methods as needed for results handler, error strategy, etc.
+    // For a Task resolving to an awaitable future
+    // For a Task that sends and receives Stream events via channels
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    /// 
+    /// - `false` if the timeout was reached and some tasks were still running
+    /// - `true` if all tasks completed successfully within the timeout
+    /// # Errors
+    /// # Returns
+    /// # Returns
+    /// Accepts a closure returning T, Result<T, E>, Future<Output = T>, or Future<Output = Result<T, E>>
+    /// Access all collected items in their native collection
+    /// Access the collector for this event
+    /// Access the data payload of the event
+    /// Access the event data
+    /// Access the underlying value being created by this task
+    /// Add a child channel to this task's relationships
+    /// Add a dependency relationship between tasks
+    /// Add a receiver to process task events with a collector
+    /// Add a stream processor to process the entire event stream
+    /// Add a task to a group
+    /// Adds a task to the orchestrator's management scope without starting execution.
+    /// Allows registering cleanup or notification code to run when
+    /// Allows specifying exactly how aggressively the task should
+    /// as it allows the task to release resources properly.
+    /// Associated type for child channel receiver
+    /// Associated type for child channel sender
+    /// Associated type for parent channel receiver 
+    /// Associated type for parent channel sender
+    /// Associates a task with a named group for batch operations.
+    /// Associates a task with a named group. Returns Ok(()) if successful, or Err(OrchestratorError) if the operation failed.
+    /// Attempt to recover from an error by executing fallback work
+    /// Attempts to cancel all tasks in the specified group.
+    /// Attempts to cancel the task with the given ID. Also cancels any tasks
+    /// Attempts to cancel the task with the given ID. Returns Ok(()) on success, or Err(OrchestratorError) if cancellation failed.
+    /// Attempts to gracefully shut down the runtime, waiting for active tasks
+    /// Attempts to gracefully shut down the runtime, waiting for active tasks to complete up to the specified timeout.
+    /// Average execution time across all completed tasks
+    /// Average latency for read operations
+    /// Average latency for write operations
+    /// be terminated.
+    /// Begins execution of all registered tasks, respecting dependencies.
+    /// Begins execution of all tasks in the specified group, respecting dependencies.
+    /// Begins execution of the task with the given ID, respecting any dependencies.
+    /// Block and wait for a task to complete
+    /// block the current thread until the future completes.
+    /// Build and return a configured runtime
+    /// Calculate the difference between two priorities
+    /// Cancel a specific task
+    /// Cancel all tasks in a group
+    /// Cancel the task with the given level of severity
+    /// cancellation occurs.
+    /// cancelled, or tracked for status updates.
+    /// Chain with a function that handles errors
+    /// Chain with another operation that returns a TaskResult
+    /// Check if recovery is possible for this error
+    /// Check if retries are exhausted
+    /// Check if the cancellation was successful
+    /// Check if the runtime is still running
+    /// Check if the task failed
+    /// Check if the task has been cancelled
+    /// Check if the task is still running
+    /// Check if the task timed out
+    /// Check if the task was cancelled
+    /// Check if this priority is higher than another
+    /// Check if this priority is lower than another
+    /// Check if this task has a parent
+    /// Check if this task's computation failed with an error
+    /// Check if this task's computation succeeded
+    /// Check if tracing is enabled for this task
+    /// Child tasks can communicate with their parent through the TaskRelationships interface.
+    /// Clear all completed tasks from the orchestra's tracking
+    /// Collect a single item (automatically generates a UUID key)
+    /// Collect an item with a specific key
+    /// Collect multiple items
+    /// Configure the number of retry attempts for failures
+    /// Consume the task and return just the result value
+    /// Convert a raw numeric value to a priority
+    /// CPU time in system/kernel mode
+    /// CPU time in user mode
+    /// CPU time used by this task in seconds
+    /// CPU utilization as a fraction (0.0 to 1.0 per core)
+    /// Create a builder for a final event
+    /// Create a builder with specified data
+    /// Create a builder with specified event type
+    /// Create a new builder for this event type
+    /// Create a new builder instance (internal method)
+    /// Create a new runtime builder with default settings
+    /// Create a new sender event builder
+    /// Create a task group for batch operations
+    /// Create a task that can be chained with others
+    /// Creates a fresh execution context with the given configuration options.
+    /// Creates a named group for organizing related tasks. Returns Ok(()) if the group was created, or Err(OrchestratorError) if creation failed.
+    /// Creates a named group that can be used to organize and manage related tasks.
+    /// Current IO operations per second
+    /// Current memory allocated by this task in bytes
+    /// dependencies can't be added (e.g., already running or completed).
+    /// Enable or disable detailed execution tracing
+    /// Event identifier
+    /// Execute the work and return a Future that resolves to the result
+    /// Executes a future to completion on the current thread. This method will
+    /// execution, either successfully or with an error.
+    /// failed, and pending tasks, as well as average execution times.
+    /// false if it has been shut down or is in the process of shutting down.
+    /// for any filesystem operations performed by this task.
+    /// For when graceful cancellation is taking too long or
+    /// Forcefully cancel the task with minimal cleanup
+    /// Get a reference to the error value, if available
+    /// Get a reference to the success value, if available
+    /// Get access to child channel receivers
+    /// Get access to child channel senders
+    /// Get access to the parent channel receiver
+    /// Get access to the parent channel sender
+    /// Get all collected items
+    /// Get all collected items as a vector (for convenience)
+    /// Get all tasks with their current status
+    /// Get communication handles for this task's relationships
+    /// Get mutable communication handles for this task's relationships
+    /// Get the current number of active tasks
+    /// Get the current retry attempt number
+    /// Get the current status of a task
+    /// Get the current task execution statistics
+    /// Get the current working directory for task execution
+    /// Get the default priority level
+    /// Get the event type
+    /// Get the fallback work that will be executed on recovery
+    /// Get the highest possible priority
+    /// Get the level at which the task was cancelled
+    /// Get the lowest possible priority
+    /// Get the maximum retry count
+    /// Get the name of this orchestra context
+    /// Get the number of children
+    /// Get the numeric value of this priority
+    /// Get the priority of this task
+    /// Get the result of this task computation
+    /// Get the retry strategy
+    /// Get the runtime this task is running in
+    /// Get the string representation of this task ID
+    /// Get the task's name
+    /// Get the task's unique identifier
+    /// Gracefully cancel the task, allowing it to clean up
+    /// Groups allow operations to be performed on multiple tasks at once.
+    /// Handle an error that occurred during task execution
+    /// Identifier of the task this event belongs to
+    /// Immediately terminate the task with no cleanup
+    /// in this context that don't explicitly specify a different priority.
+    /// Initialize a new task execution context
+    /// IO wait time (time spent waiting for IO operations)
+    /// It allows for custom error handling logic to be applied.
+    /// later debugging and monitoring.
+    /// Map the error value to another error
+    /// Map the success value to another type
+    /// Mark this as the final event
+    /// Maximum execution time observed
+    /// Memory allocation rate (bytes per second)
+    /// Minimum execution time observed
+    /// must be stopped immediately regardless of consequences.
+    /// Number of read operations performed
+    /// Number of tasks currently running
+    /// Number of tasks that have completed successfully
+    /// Number of tasks that have failed
+    /// Number of tasks waiting to start
+    /// Number of write operations performed
+    /// Only use this in emergency situations where the task
+    /// Override the default task priority for all tasks in this context
+    /// Parse a task ID from a string representation
+    /// Peak memory usage by this task in bytes
+    /// preserving running and pending tasks.
+    /// Record an error for later analysis
+    /// Register a callback to be executed when the task is cancelled
+    /// Register a new task with the orchestrator
+    /// Removes all completed tasks from memory, freeing resources while
+    /// Returns `OrchestratorError::DependencyCycle` if this would create a dependency cycle.
+    /// Returns `OrchestratorError::InvalidTaskState` if a task is in a state where
+    /// Returns `OrchestratorError::TaskNotFound` if either task doesn't exist.
+    /// Returns a future that completes when all registered tasks have finished
+    /// Returns a future that completes when the task is finished.
+    /// Returns a mapping of task IDs to their current execution status.
+    /// Returns a reference to the runtime that is executing this task.
+    /// Returns handles for communicating with parent and child tasks
+    /// Returns mutable handles for managing parent and child task communications.
+    /// Returns Ok(()) if all tasks completed successfully, or Err(OrchestratorError) if the timeout was reached or shutdown failed.
+    /// Returns statistics about task execution, including counts of completed,
+    /// Returns the current execution status of the task with the given ID.
+    /// Returns the name assigned to this execution context.
+    /// Returns the number of tasks currently being managed by this runtime.
+    /// Returns the path that should be used as the working directory
+    /// Returns the spawned task, which implements AsyncTask and can be awaited,
+    /// Returns true if the runtime is active and can accept new tasks,
+    /// Returns whether a cancellation has been requested for this task.
+    /// Run a child task
+    /// Run a new task from this one
+    /// Schedules a task for execution with an optional priority level.
+    /// Set the event type
+    /// Set the number of worker threads for the runtime
+    /// Set the parent channel for this task
+    /// Set the parent for this task
+    /// Set the stack size for worker threads
+    /// Set the task's name
+    /// Sets a descriptive name for the task.
+    /// Sets a new default priority that will be applied to all tasks spawned
+    /// Sets a timeout duration for task execution.
+    /// Sets the receiver for the sender builder.
+    /// Sets the sender for the emitting task.
+    /// Sets the task's execution priority.
+    /// Shutdown the runtime, waiting for all tasks to complete
+    /// Spawn a task with a specific priority
+    /// Specifies that one task depends on another, ensuring the dependent task
+    /// Start all tasks in a group
+    /// Start execution of a specific task
+    /// Start execution of all registered tasks
+    /// Task identifier
+    /// Tasks will be scheduled according to their priorities and dependencies.
+    /// that depend on this task.
+    /// The context tracks all tasks spawned within it and provides isolation.
+    /// The task must implement SpawningTask to ensure it can be properly executed.
+    /// The type of fallback work that returns Result<T, AsyncTaskError>
+    /// The type of this event
+    /// This establishes a parent-child relationship where the Orchestra can be its own parent.
+    /// This is the preferred cancellation method when time permits,
+    /// This method is called when an error occurs during task execution.
+    /// This method logs the error with appropriate context for
+    /// through message passing channels.
+    /// to complete up to the specified timeout duration.
+    /// Total number of allocations performed by this task
+    /// Total number of bytes read
+    /// Total number of bytes written
+    /// Unique identifier for this event
+    /// Unwrap the error, returning the error value or panicking
+    /// Unwrap the result, returning the success value or panicking
+    /// Update the event data
+    /// Wait for all child tasks to complete
+    /// Wait for all tasks to complete
+    /// when more urgent cancellation is needed.
+    /// When the event processing completed
+    /// When the event processing started
+    /// When the event was created
+    /// Whether this is the final event
+    /// Whether this is the final event in a sequence
+    /// won't start until the dependency completes successfully.
+    #[allow(dead_code)]
+    #[allow(dead_code)]
+    #[doc(hidden)]
+    + CancellableTask<T>
+    + ContextualizedTask<T, I>
+    + MetricsEnabledTask<T>
+    + NamedTask
+    + RecoverableTask<T>
+    + StatusEnabledTask<T>
+    + TimedTask<T>
+    + TracingTask<T>
+    AsyncTask<T, I> + Send + 'static
+    AsyncTask<T, I> + Send + 'static
+    AsyncTaskBuilder
+    AsyncTaskBuilder
+    E: Send + 'static,
+    E: Send + 'static,
+    fn active_task_count(&self) -> usize;
+    fn add_child_channel(&mut self, sender: Self::ChildSender, receiver: Self::ChildReceiver);
+    fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError>;
+    fn add_task_to_group(&self, task_id: &I, group_name: &str) -> Result<(), OrchestratorError>;
+    fn all_task_statuses(&self) -> Vec<(I, TaskStatus)>;
+    fn allocation_count(&self) -> u64;
+    fn allocation_rate(&self) -> f64;
+    fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>
+    fn as_err(&self) -> Option<&AsyncTaskError>;
+    fn as_ref(&self) -> Option<&T>;
+    fn as_u8(&self) -> u8;
+    fn avg_execution_time_ms(&self) -> f64;
+    fn await_result_with_handler<F, R, H, Out>(
+    fn await_result(
+    fn await_result<F, R>(self, work: F) -> impl Future<Output = Result<T, E>> + Send
+    fn block_on<F, R>(&self, future: F) -> R
+    fn build(self) -> impl Runtime<T, I>;
+    fn builder() -> Self::Builder;
+    fn bytes_read(&self) -> u64;
+    fn bytes_written(&self) -> u64;
+    fn can_recover_from(&self, error: &AsyncTaskError) -> bool;
+    fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+    fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+    fn cancel_group(&self, group_name: &str) -> usize;
+    fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;
+    fn cancel_task(&self, task_id: &I) -> Result<(), OrchestratorError>;
+    fn cancel(
+    fn cancel(&self) -> Result<(), OrchestratorError>;
+    fn cancellation_level(&self) -> CancellationLevel;
+    fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
+    fn child_count(&self) -> usize;
+    fn child_receivers(&self) -> &[Self::ChildReceiver];
+    fn child_senders(&self) -> &[Self::ChildSender];
+    fn clear_completed_tasks(&self) -> usize;
+    fn collect_item(&mut self, item: C);
+    fn collect_items(&mut self, items: Vec<C>);
+    fn collect<K>(&mut self, key: K, item: C)
+    fn collected(&self) -> &Collection;
+    fn collected(&self) -> &Collection;
+    fn collector(&self) -> &C;
+    fn completed_count(&self) -> usize;
+    fn completed_timestamp(&self) -> &DateTime<Utc>;
+    fn completed_timestamp(&self) -> SystemTime;
+    fn context_name(&self) -> &str;
+    fn cpu_time(&self) -> Duration;
+    fn cpu_usage(&self) -> &Self::Cpu;
+    fn create_context(&self, name: &str) -> impl Orchestra<T, Task, I> + 'static;
+    fn create_group(&self, group_name: &str) -> Result<(), OrchestratorError>;
+    fn created_timestamp(&self) -> &DateTime<Utc>;
+    fn created_timestamp(&self) -> SystemTime;
+    fn current_bytes(&self) -> u64;
+    fn current_retry(&self) -> u8;
+    fn cwd(&self) -> PathBuf;
+    fn data(&self) -> &T;
+    fn data(&self) -> &T;
+    fn data(data: T) -> Self::Builder;
+    fn data(self, data: T) -> Self;
+    fn days(self) -> Duration;
+    fn default_priority() -> Self;
+    fn difference(&self, other: &Self) -> u8;
+    fn emit_events<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
+    fn emits<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
+    fn event_id(&self) -> &Uuid;
+    fn event_id(&self) -> &Uuid;
+    fn event_type(&self) -> &StreamingEventType<T>;
+    fn event_type(&self) -> &StreamingEventType<T>;
+    fn event_type(event_type: StreamingEventType<T>) -> Self::Builder;
+    fn event_type(self, event_type: StreamingEventType<T>) -> Self;
+    fn executed_timestamp(&self) -> SystemTime;
+    fn execution_stats(&self) -> Self::StatsTask;
+    fn failed_count(&self) -> usize;
+    fn fallback_work(&self) -> &Self::FallbackWork;
+    fn from_string(s: &str) -> Option<Self>
+    fn from_u8(value: u8) -> Self;
+    fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError>;
+    fn has_parent(&self) -> bool;
+    fn highest() -> Self;
+    fn hours(self) -> Duration;
+    fn into_async_result(self) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
+    fn into_result(self) -> Result<T, AsyncTaskError>
+    fn io_usage(&self) -> &Self::Io;
+    fn io_wait_time(&self) -> Duration;
+    fn is_cancelled(&self) -> bool;
+    fn is_cancelled(&self) -> bool;
+    fn is_complete(&self) -> bool;
+    fn is_err(&self) -> bool;
+    fn is_failure(&self) -> bool;
+    fn is_final() -> Self::Builder;
+    fn is_final(&self) -> bool;
+    fn is_final(&self) -> bool;
+    fn is_final(self) -> Self;
+    fn is_higher_than(&self, other: &Self) -> bool;
+    fn is_lower_than(&self, other: &Self) -> bool;
+    fn is_ok(&self) -> bool;
+    fn is_running(&self) -> bool;
+    fn is_running(&self) -> bool;
+    fn is_success(&self) -> bool;
+    fn is_timeout(&self) -> bool;
+    fn is_tracing_enabled(&self) -> bool;
+    fn join_all(&self) -> Self::JoinAllFuture;
+    fn join_children(&self) -> Self::JoinChildrenFuture;
+    fn lowest() -> Self;
+    fn map_err<F>(self, f: F) -> Self::MapErrResult
+    fn map<U, F>(self, f: F) -> Self::MapResult<U>
+    fn max_execution_time_ms(&self) -> u64;
+    fn max_retries(&self) -> u8;
+    fn memory_usage(&self) -> &Self::Memory;
+    fn micros(self) -> Duration;
+    fn millis(self) -> Duration;
+    fn min_execution_time_ms(&self) -> u64;
+    fn minutes(self) -> Duration;
+    fn name(&self) -> Option<&str>;
+    fn nanos(self) -> Duration;
+    fn new() -> Self;
+    fn new() -> Self;
+    fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self;
+    fn on_cancel<F, Fut>(&self, callback: F)
+    fn operations_per_second(&self) -> f64;
+    fn or_else<F, Fut>(self, f: F) -> Self::OrElseFuture
+    fn orchestrator<O: crate::orchestra::TaskOrchestrator<T, Task, I>>(
+    fn parent_receiver(&self) -> Option<&Self::ParentReceiver>;
+    fn parent_sender(&self) -> Option<&Self::ParentSender>;
+    fn parent(self, parent: Self::ParentType) -> Self;
+    fn peak_bytes(&self) -> u64;
+    fn pending_count(&self) -> usize;
+    fn priority(&self) -> &impl RankableByPriority;
+    fn read_latency(&self) -> Duration;
+    fn read_operations(&self) -> u64;
+    fn receiver(
+    fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
+    fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder
+    fn record_error(&self, error: &AsyncTaskError);
+    fn recover(&self, error: AsyncTaskError) -> impl Future<Output = Result<T, AsyncTaskError>> + Send;
+    fn register_task(&self, task: Task) -> Self::RegisterTaskReturn;
+    fn relationships_mut(&mut self) -> &mut Self::RelationshipsType;
+    fn relationships(&self) -> &Self::RelationshipsType;
+    fn result(&self) -> Result<&T, &AsyncTaskError>;
+    fn retries_exhausted(&self) -> bool {
+    fn retry_strategy(&self) -> RetryStrategy;
+    fn retry(self, attempts: u8) -> Self;
+    fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
+    fn run(self, work: Self::AsyncWork) -> Self;
+    fn run(self) -> impl Future<Output = R> + Send + 'static;
+    fn run(self) -> Self::EmittingTask;
+    fn run(self) -> Self::Task;
+    fn run<F, R>(self, work: F) -> Self::Task
+    fn running_count(&self) -> usize;
+    fn runtime(&self) -> &Self::RuntimeType;
+    fn seconds(self) -> Duration;
+    fn sender<F>(self, sender: F, strategy: SenderStrategy) -> Self::SenderBuilder
+    fn set_default_priority(&self, priority: TaskPriority);
+    fn set_name(&mut self, name: String);
+    fn set_parent_channel(&mut self, sender: Self::ParentSender, receiver: Self::ParentReceiver);
+    fn shutdown(&self, timeout: Duration) -> Result<(), OrchestratorError>;
+    fn spawn(
+    fn stack_size(self, size_bytes: usize) -> Self;
+    fn start_all(&self) -> Self::StartAllFuture;
+    fn start_group(&self, group_name: &str) -> Self::StartGroupFuture;
+    fn start_queue(self) -> Self::Task;
+    fn start_task(&self, task_id: &I) -> Self::StartTaskFuture;
+    fn started_timestamp(&self) -> &DateTime<Utc>;
+    fn status(&self) -> TaskStatus;
+    fn stream_processor<C: Send + 'static, F, S, Coll: Send + 'static>(
+    fn system_time(&self) -> Duration;
+    fn task_id(&self) -> &Uuid;
+    fn task_id(&self) -> &Uuid;
+    fn task_id(&self) -> I;
+    fn task_status(&self, task_id: &I) -> Option<TaskStatus>;
+    fn timeout(&self) -> Duration;
+    fn timeout(self, duration: std::time::Duration) -> Self;
+    fn to_string(&self) -> String;
+    fn to<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;
+    fn tracing(self, enabled: bool) -> Self;
+    fn unwrap_err(self) -> AsyncTaskError
+    fn unwrap(self) -> T
+    fn user_time(&self) -> Duration;
+    fn utilization(&self) -> f64;
+    fn value(&self) -> Option<&T>;
+    fn worker_threads(self, count: usize) -> Self;
+    fn write_latency(&self) -> Duration;
+    fn write_operations(&self) -> u64;
+    fn yield_results(&self) -> Vec<Item>;
+    I: crate::task::task_id::TaskId,
+    I: crate::task::task_id::TaskId,
+    I: crate::task::TaskId,
+    PrioritizedTask<T>
+    ReceiverEvent<T, C> + Send + 'static
+    Runtime<T, I> + TaskOrchestrator<T, Task, I> + AsyncTask<T, I>
+    Send + 'static
+    Send + 'static
+    T: Clone + Send + 'static,
+    T: Clone + Send + 'static,
+    T: Clone + Send + 'static,
+    Task: crate::task::AsyncTask<T, I>,
+    type AndThenFuture<U>: Future<Output = Self::AndThenResult<U>> + Send + 'static;
+    type AndThenResult<U>: TaskResult<U>;
+    type AsyncWork: crate::task::builder::AsyncWork<T> + Send + 'static;
+    type Builder: SenderEventBuilder<T>;
+    type ChildReceiver: Send + Sync;
+    type ChildSender: Send + Sync;
+    type Cpu: CpuUsage;
+    type EmittingTask: crate::task::emit::EmittingTask<T, U, E, I>;
+    type EmittingTaskType: EmittingTask<T, C, E, I>;
+    type EmittingTaskType: EmittingTask<T, C, E, I>;
+    type FallbackWork: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync;
+    type Final: FinalEvent<T, C, C>;
+    type Io: IoUsage;
+    type JoinAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;
+    type JoinChildrenFuture: Future<Output = Self::JoinChildrenResult> + Send + 'static;
+    type JoinChildrenResult: AsyncResult<Vec<I>>;
+    type MapErrResult: AsyncResult<T>;
+    type MapResult<U>: AsyncResult<U>;
+    type Memory: MemoryUsage;
+    type Next: AsyncTaskBuilder;
+    type OrElseFuture: Future<Output = Self> + Send + 'static;
+    type OutputFuture: Future<Output = Self::TaskResult> + Send + 'static;
+    type ParentReceiver: Send + Sync;
+    type ParentSender: Send + Sync;
+    type ParentType;
+    type Receiver: ReceiverBuilder<T, U, E, I>;
+    type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;
+    type RegisterTaskReturn;
+    type RelationshipsType: TaskRelationships<T, I>;
+    type RuntimeType: Runtime<T, I>;
+    type SenderBuilder: SenderBuilder<T, C, E, I>;
+    type SpawnedTask: AsyncTask<T, I> + Future<Output = Result<T, AsyncTaskError>>;
+    type StartAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;
+    type StartGroupFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;
+    type StartTaskFuture: Future<Output = Result<T, AsyncTaskError>> + Send;
+    type Stats: ExecutionStats + Clone + Send + 'static;
+    type StatsTask: AsyncTask<Self::Stats, I>;
+    type StreamProcessorReceiver<C: Send + 'static, Coll: Send + 'static>: ReceiverBuilder<T, Coll, E, I>;
+    type Task: crate::task::emit::EmittingTask<T, U, E, I>;
+    type Task: EmittingTask<T, C, E, I>;
+    type Task: SpawningTask<T, I>;
+    type TaskResult: TaskResult<T>;
+    U: Send + 'static,
+    U: Send + 'static,
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+    where
+{
+{
+{
+{
+{
+{
+{
+{
+{
+{
+{
+{
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+>
+>: Sized
+>: Sized
+pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {
+pub trait AsyncTask<T: Clone + Send + 'static, I: crate::task::TaskId>:
+pub trait AsyncTaskBuilder: Sized {
+pub trait AsyncWork<R> {
+pub trait CancellableTask<T: Send + 'static> {
+pub trait CancellationResult {
+pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
+pub trait ContextualizedTask<T: Clone + Send + 'static, I: crate::task::TaskId> {
+pub trait CpuUsage: Send + Sync + 'static {
+pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait ExecutionStats {
+pub trait FinalEvent<T, C, Item, Collection = HashMap<Uuid, Item>>:
+pub trait IntoAsyncResult<T, E>: Send + 'static {
+pub trait IoUsage: Send + Sync + 'static {
+pub trait MemoryUsage: Send + Sync + 'static {
+pub trait MetricsEnabledTask<T: Send + 'static> {
+pub trait NamedTask {
+pub trait Orchestra<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:
+pub trait OrchestratorBuilder<
+pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {
+pub trait RankableByPriority: Copy + Eq + Ord + Send + Sync + 'static {
+pub trait ReceiverBuilder<
+pub trait ReceiverBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+pub trait ReceiverEvent<T, C>: Send + 'static {
+pub trait ReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait RecoverableTask<T: Clone + Send + 'static> {
+pub trait Runtime<T: Clone + Send + 'static, I: crate::task::TaskId> {
+pub trait RuntimeBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {
+pub trait SenderBuilder<
+pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
+pub trait SenderEvent<T>: StreamingEvent<T> + Send + 'static {
+pub trait SenderEventBuilder<T>: SenderEvent<T> + Send + 'static {
+pub trait SenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait SpawningTask<T: Clone + Send + 'static, I: crate::task::TaskId>:
+pub trait SpawningTaskBuilder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>:
+pub trait StatusEnabledTask<T: Send + 'static> {
+pub trait StreamingEvent<T>: Send + 'static {
+pub trait TaskId: Debug + Copy + Eq + Ord + Send + Sync + 'static {
+pub trait TaskOrchestrator<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId> {
+pub trait TaskRelationships<T: Clone + Send + 'static, I: TaskId>: Send + Sync {
+pub trait TaskResult<T>: Send + 'static {
+pub trait TimedTask<T: Send + 'static> {
+pub trait TimeExt {
+pub trait TracingTask<T: Send + 'static> {

@@ -1,0 +1,37 @@
+[package]
+name = "sweet_async_zkp
+version = "0.1.0"
+edition = "2024"
+authors = ["David Maple <david@cyrup.ai>"]
+description = "Cryptography utilities for Sweet Async"
+license = "MIT"
+repository = "https://github.com/cyrup-ai/sweet_async.git"
+workspace = "../../"
+
+[dependencies]
+sweet_async_api = { path = "../api", features = ["crypt"] }
+serde = { workspace = true, features = ["derive"] }
+log = "0.4.20"
+
+# Core encryption dependencies
+aead = { workspace = true, optional = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+
+# Algorithm-specific dependencies
+aes-gcm = { workspace = true, optional = true }
+chacha20poly1305 = { workspace = true, optional = true }
+
+# Hash functions
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+
+# Zero-knowledge dependencies
+ark-ff = { workspace = true, optional = true }
+ark-ec = { workspace = true, optional = true }
+ark-std = { workspace = true, optional = true }
+ark-bls12-381 = { workspace = true, optional = true }
+ark-groth16 = { workspace = true, optional = true }
+ark-r1cs-std = { workspace = true, optional = true }

@@ -1,0 +1,12 @@
+[[item]]
+name = "Docs"
+path = "/docs/"
+[[item]]
+name = "API"
+path = "/api/"
+[[item]]
+name = "Examples"
+path = "/examples/"
+[[item]]
+name = "GitHub"
+path = "https://github.com/sweet-async/sweet-async"

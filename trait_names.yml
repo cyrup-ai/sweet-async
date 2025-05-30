@@ -1,0 +1,5 @@
+id: extract-trait-names
+language: Rust
+rule:
+  kind: trait_item
+  pattern: pub trait $TRAIT_NAME

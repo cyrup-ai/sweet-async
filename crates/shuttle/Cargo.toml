@@ -1,0 +1,9 @@
+[package]
+name = "sweet_async_shuttle"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shuttle-runtime.workspace = true
+shuttle-service.workspace = true
+sweet_async_api = { version = "0.1.0", path = "../api" }

@@ -1,0 +1,21 @@
+[[contact]]
+name = "Email"
+address = """<a href="mailto:david@cyrup.ai">david@cyrup.ai</a>"""
+icon = "fa-envelope"
+[[contact]]
+name = "GitHub"
+address = """<a href="https://github.com/kloudsamurai">@kloudsamurai</a>"""
+icon = "fa-github"
+[[contact]]
+name = "LinkedIn"
+address = """<a href="https://www.linkedin.com/in/davemaple/">David Maple</a>"""
+icon = "fa-linkedin"
+[[social]]
+icon = "fa-github"
+url = "https://github.com/kloudsamurai"
+[[social]]
+icon = "fa-linkedin"
+url = "https://www.linkedin.com/in/davemaple/"
+[[social]]
+icon = "fa-stack-overflow"
+url = "https://stackoverflow.com/users/620237/dave-maple"

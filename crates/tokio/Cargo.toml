@@ -38,19 +38,18 @@ tokio-util = { workspace = true }
 hostname = { workspace = true }
 bincode = { workspace = true }
 # Encryption dependencies (optional)
-aead = { workspace = true, optional = true }
-aes-gcm = { workspace = true, optional = true }
-chacha20poly1305 = { workspace = true, optional = true }
-zeroize = { workspace = true, optional = true }
+cryypt = { workspace = true, optional = true }
 
 [features]
 default = []
 # Enable encryption support for task communication
-encryption = ["aead", "aes-gcm", "chacha20poly1305", "zeroize", "sweet_async_api/encryption"]
+encryption = ["cryypt"]
 # Enable metrics collection
 metrics = []
 # Enable distributed task support with vector clocks
 distributed = []
+# Enable zero-knowledge proof support
+zk = []
 
 [dev-dependencies]
 tokio-test = { workspace = true }

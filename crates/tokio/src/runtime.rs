@@ -4,20 +4,20 @@
 //! executing blocking operations without blocking the async runtime.
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::runtime::{Handle, Runtime};
-use tokio::task::{self, JoinHandle};
+use tokio::task;
 
 use sweet_async_api::orchestra::{OrchestratorError, runtime::Runtime as ApiRuntime};
-use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
+use sweet_async_api::task::{TaskId, TaskPriority};
 use sweet_async_api::task::spawn::SpawningTask;
 
-use crate::task::async_task::TokioAsyncTask;
+use crate::task::spawn::spawning_task::TokioSpawningTask;
+use crate::task::tokio_task::TokioTask;
 
-/// Wrapper around Tokio's runtime
+/// Implementation of sweet_async_api's Runtime trait using Tokio
 pub struct TokioRuntime {
     runtime: Option<Runtime>,
     pub(crate) handle: Handle,
@@ -47,7 +47,7 @@ impl TokioRuntime {
         }
     }
     
-    /// Create a new runtime with a specific number of worker threads
+    /// Create a new runtime with custom configuration
     pub fn with_config(workers: usize) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(workers)
@@ -72,23 +72,22 @@ impl TokioRuntime {
 }
 
 impl<T: Clone + Send + Sync + 'static, I: TaskId> ApiRuntime<T, I> for TokioRuntime {
-    type SpawnedTask = TokioAsyncTask<T, I>;
+    type SpawnedTask = TokioSpawningTask<T, I>;
 
     fn spawn(
         &self,
         task: impl SpawningTask<T, I> + 'static,
-        priority: TaskPriority,
+        _priority: TaskPriority,
     ) -> Self::SpawnedTask {
-        // Create a new TokioAsyncTask that wraps the SpawningTask's work
-        let tokio_task = TokioAsyncTask::<T, I>::new_with_priority(
-            task.task_id(),
-            priority,
-            self.handle.clone(),
-            self.active_tasks.clone(),
-        );
+        // Create a work function that executes the provided task
+        let id = task.task_id();
+        let work = move || async move {
+            // The task itself is a future, so we can await it directly
+            task.await
+        };
         
-        // The actual work from SpawningTask will be executed when tokio_task is awaited
-        tokio_task
+        // Create a TokioSpawningTask with this work
+        TokioSpawningTask::new(id, work)
     }
 
     fn block_on<F, R>(&self, future: F) -> R
@@ -170,4 +169,14 @@ where
     async move {
         safe_blocking(f).await
     }
+}
+
+/// Create a new Tokio runtime using the current handle
+pub fn new_runtime() -> TokioRuntime {
+    TokioRuntime::new()
+}
+
+/// Create a new Tokio runtime with custom configuration
+pub fn new_runtime_with_config(workers: usize) -> TokioRuntime {
+    TokioRuntime::with_config(workers)
 }

@@ -2,7 +2,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// Standard error type for task operations
-#[derive(Error, Debug, Clone)]
+#[derive(Debug, Error)]
 pub enum AsyncTaskError {
     #[error("Task timed out after {0:?}")]
     Timeout(Duration),
@@ -24,7 +24,13 @@ pub enum AsyncTaskError {
 
     #[error("Invalid task state: {0}")]
     InvalidState(String),
+    
+    #[error("Invalid data format")]
+    InvalidData,
 
+    #[error("Key version too old, minimum required: {0}")]
+    KeyVersionTooOld(u8),
+    
     #[error("IO error: {0}")]
     Io(String),
 

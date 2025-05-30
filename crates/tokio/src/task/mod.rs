@@ -4,14 +4,7 @@
 //! for the Tokio runtime, including async tasks, builders, and utility types.
 
 // Core task implementation
-pub mod async_task;
-
-// Task trait implementations - removed to avoid conflicts with async_task implementations
-// pub mod cancellable_task;
-// pub mod recoverable_task;
-// pub mod timed_task;
-// pub mod tracing_task;
-// pub mod task_context;
+pub mod tokio_task;
 
 // Builder pattern implementation
 pub mod builder;
@@ -24,23 +17,11 @@ pub mod spawn;
 pub mod adaptive;
 pub mod adaptive_channel;
 pub mod async_work;
-pub mod vector_clock;
-pub mod task_envelope;
 
 // Implementation modules
 pub mod default_context;
-pub mod encryption;
-pub mod task_communication;
-pub mod distributed_comm;
+pub mod relationships;
 
-// No re-exports - use the modules directly via their clean interfaces
-
-// Re-export the main AsyncTask type for convenient access
-pub use async_task::AsyncTask;
-
-// Re-export extension traits for additional utilities - removed to avoid conflicts
-// pub use cancellable_task::*;
-// pub use recoverable_task::*;
-// pub use timed_task::*;
-// pub use tracing_task::*;
-// pub use task_context::*;
+// Re-export the main TokioTask type for convenient access
+pub use tokio_task::{TokioTask, TokioAsyncTask};
+pub use builder::TokioAsyncTaskBuilder;

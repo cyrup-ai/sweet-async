@@ -12,7 +12,7 @@ use sweet_async_api::task::emit::{EmittingTask, FinalEvent, SenderTask, Receiver
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
 
-use crate::task::async_task::AsyncTask;
+use crate::task::tokio_task::TokioTask;
 use crate::task::emit::{TokioEmittingTask, TokioFinalEvent};
 
 /// Implementation of SenderTask for AsyncTask

@@ -15,12 +15,12 @@ use sweet_async_api::orchestra::orchestrator::{OrchestratorError, TaskOrchestrat
 use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, TaskId, TaskStatus, StatusEnabledTask};
 
 use crate::runtime::TokioRuntime;
-use crate::task::async_task::AsyncTask;
+use crate::task::tokio_task::TokioTask;
 
 /// Messages for orchestrator operations
-enum OrchestratorMessage<T, I> {
+enum OrchestratorMessage<T: Clone + Send + Sync + 'static, I: TaskId> {
     RegisterTask {
-        task: AsyncTask<T, I>,
+        task: TokioTask<T, I>,
         respond: oneshot::Sender<I>,
     },
     AddDependency {
@@ -30,7 +30,7 @@ enum OrchestratorMessage<T, I> {
     },
     GetTask {
         id: I,
-        respond: oneshot::Sender<Option<AsyncTask<T, I>>>,
+        respond: oneshot::Sender<Option<TokioTask<T, I>>>,
     },
     GetTaskStatus {
         id: I,
@@ -84,7 +84,7 @@ where
         
         // Spawn the actor loop
         runtime.handle().spawn(async move {
-            let mut tasks: HashMap<I, AsyncTask<T, I>> = HashMap::new();
+            let mut tasks: HashMap<I, TokioTask<T, I>> = HashMap::new();
             let mut deps: HashMap<I, HashSet<I>> = HashMap::new();
             let mut groups: HashMap<String, HashSet<I>> = HashMap::new();
             
@@ -200,7 +200,7 @@ impl<T, I, Task> TaskOrchestrator<T, Task, I> for ChannelOrchestrator<T, I>
 where
     T: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Eq + Hash + Send + 'static,
-    Task: ApiAsyncTask<T, I> + Into<AsyncTask<T, I>>,
+    Task: ApiAsyncTask<T, I> + Into<TokioTask<T, I>>,
 {
     type RegisterTaskReturn = I;
     type StartTaskFuture = BoxFut<'static, Result<T, AsyncTaskError>>;
@@ -209,7 +209,7 @@ where
     type StartGroupFuture = BoxFut<'static, Vec<(I, Result<T, AsyncTaskError>)>>;
 
     fn register_task(&self, task: Task) -> Self::RegisterTaskReturn {
-        let tokio_task: AsyncTask<T, I> = task.into();
+        let tokio_task: TokioTask<T, I> = task.into();
         let (tx, rx) = oneshot::channel();
         
         let _ = self.sender.send(OrchestratorMessage::RegisterTask {

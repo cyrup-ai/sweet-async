@@ -1,0 +1,10 @@
+Error: Cannot parse rule trait_bounds.yml
+Help: The file is not a valid ast-grep rule. Please refer to doc and fix the error.
+See also: https://ast-grep.github.io/guide/rule-config.html
+
+✖ Caused by
+╰▻ Fail to parse yaml as Rule.
+╰▻ `rule` is not configured correctly.
+╰▻ Rule contains invalid kind matcher.
+╰▻ Kind `trait_bound` is invalid.
+

@@ -16,6 +16,10 @@ use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+// Export the DefaultOrchestratorBuilder from the nested module
+pub mod builder;
+pub use self::builder::DefaultOrchestratorBuilder;
+
 /// Builder for creating and configuring Tokio tasks
 ///
 /// This builder implements the core configuration options common to all task types,

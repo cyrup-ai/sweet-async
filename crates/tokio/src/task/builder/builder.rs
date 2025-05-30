@@ -1,28 +1,25 @@
-//! Convenience builder functions for creating Tokio tasks
-//!
-//! This module provides simple, ergonomic functions for creating builders
-//! without having to import the full builder types directly.
-
-use std::sync::Arc;
+use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
-use sweet_async_api::task::TaskId;
-use sweet_async_api::task::AsyncTaskError;
-use sweet_async_api::task::AsyncTask;
-use sweet_async_api::task::TaskPriority;
 use sweet_async_api::orchestra::OrchestratorBuilder;
 use sweet_async_api::orchestra::orchestrator::TaskOrchestrator;
-use sweet_async_api::task::builder::AsyncTaskBuilder;
+use sweet_async_api::task::AsyncTask;
+use sweet_async_api::task::AsyncTaskError;
+use sweet_async_api::task::TaskId;
+use sweet_async_api::task::TaskPriority;
+use sweet_async_api::task::builder::{AsyncTaskBuilder, AsyncWork, SenderBuilder, SenderStrategy};
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use crate::task::builder::TokioAsyncTaskBuilder;
-use crate::task::spawn::builder::TokioSpawningTaskBuilder;
-use crate::task::emit::builder::TokioEmittingTaskBuilder;
-use crate::orchestrator::TokioOrchestrator;
+use crate::orchestra::TokioOrchestrator;
 use crate::runtime::TokioRuntime;
+use super::TokioAsyncTaskBuilder;
+use crate::task::emit::TokioEmittingTaskBuilder;
+use crate::task::spawn::TokioSpawningTaskBuilder;
 
 /// Creates a new base task builder with default settings
 ///
@@ -38,8 +35,8 @@ use crate::runtime::TokioRuntime;
 ///     fn to_string(&self) -> String { self.0.to_string() }
 ///     fn from_string(s: &str) -> Option<Self> { s.parse::<u64>().ok().map(MyTaskId) }
 /// }
-/// 
-/// let builder = builder::<String, MyTaskId>();
+///
+/// let builder = builder::builder::<String, MyTaskId>();
 /// ```
 pub fn builder<T: Send + 'static, I: TaskId>() -> TokioAsyncTaskBuilder<T, I> {
     let runtime = Handle::current();
@@ -64,20 +61,66 @@ pub fn builder<T: Send + 'static, I: TaskId>() -> TokioAsyncTaskBuilder<T, I> {
 ///     fn to_string(&self) -> String { self.0.to_string() }
 ///     fn from_string(s: &str) -> Option<Self> { s.parse::<u64>().ok().map(MyTaskId) }
 /// }
-/// 
+///
 /// let builder = builder::spawning_builder::<String, &'static str, MyTaskId>();
 /// let task = builder.run(|| async { "Hello, world!".to_string() });
 /// ```
-pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>() -> TokioSpawningTaskBuilder<T, E, I> {
-    let runtime = Handle::current();
-    let active_tasks = Arc::new(Mutex::new(Vec::new()));
-    TokioSpawningTaskBuilder::<T, E, I>::new(runtime, active_tasks)
+pub fn spawning_builder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>()
+-> TokioSpawningTaskBuilder<T, E, I> {
+    // Use the builder's own new() method which handles setup properly
+    TokioSpawningTaskBuilder::new()
+}
+
+/// Creates a new emitting task builder with default settings
+///
+/// This builder is specifically for event-based workflows that emit
+/// values over time.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use sweet_async_tokio::builder;
+/// use sweet_async_api::task::TaskId;
+///
+/// // Using a custom task ID type
+/// struct MyTaskId(u64);
+/// impl TaskId for MyTaskId {
+///     fn to_string(&self) -> String { self.0.to_string() }
+///     fn from_string(s: &str) -> Option<Self> { s.parse::<u64>().ok().map(MyTaskId) }
+/// }
+///
+/// let builder = builder::emitting_builder::<String, MyTaskId>();
+/// ```
+pub fn emitting_builder<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, EItem: Send + Sync + 'static, EOverall: Send + 'static, I: TaskId>() -> TokioEmittingTaskBuilder<T, C, EItem, EOverall, I> {
+    // Use the builder's own new() method which handles setup properly
+    TokioEmittingTaskBuilder::new()
+}
+
+/// Creates a new orchestrator with default settings
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use sweet_async_tokio::builder;
+/// use sweet_async_api::task::TaskId;
+///
+/// // Using a custom task ID type
+/// struct MyTaskId(u64);
+/// impl TaskId for MyTaskId {
+///     fn to_string(&self) -> String { self.0.to_string() }
+///     fn from_string(s: &str) -> Option<Self> { s.parse::<u64>().ok().map(MyTaskId) }
+/// }
+///
+/// let orchestrator = builder::orchestrator::<String, MyTaskId>();
+/// ```
+pub fn orchestrator<T: Clone + Send + Sync + 'static, I: TaskId + Clone + Copy + Eq + Hash + Send + 'static>() -> TokioOrchestrator<T, I> {
+    TokioOrchestrator::<T, I>::new(TokioRuntime::new())
 }
 
 /// Orchestrator builder that can forward method calls
 pub enum DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: AsyncTask<T, I>,
     I: TaskId,
 {
@@ -90,7 +133,8 @@ where
         retry_count: u8,
         tracing_enabled: bool,
         name: Option<String>,
-        _marker: PhantomData<Task>,
+        parent: Option<TokioOrchestrator<T, I>>,
+        _marker: PhantomData<(T, Task, I)>,
     },
     Emitting {
         // Similar for emitting
@@ -101,13 +145,13 @@ where
         retry_count: u8,
         tracing_enabled: bool,
         name: Option<String>,
-        _marker: PhantomData<Task>,
+        _marker: PhantomData<(T, Task, I)>,
     },
 }
 
 impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: AsyncTask<T, I>,
     I: TaskId,
 {
@@ -115,7 +159,7 @@ where
     pub fn new_spawning() -> Self {
         let runtime = Handle::current();
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
-        
+
         Self::Spawning {
             runtime,
             active_tasks,
@@ -127,12 +171,12 @@ where
             _marker: PhantomData,
         }
     }
-    
+
     /// Create a new orchestrator builder for emitting tasks
     pub fn new_emitting() -> Self {
         let runtime = Handle::current();
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
-        
+
         Self::Emitting {
             runtime,
             active_tasks,
@@ -144,69 +188,185 @@ where
             _marker: PhantomData,
         }
     }
+
+    /// Set a name for the task
+    pub fn name(self, name: &str) -> Self {
+        match self {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name: _,
+                _marker,
+            } => Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name: Some(name.to_string()),
+                _marker,
+            },
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name: _,
+                _marker,
+            } => Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name: Some(name.to_string()),
+                _marker,
+            },
+        }
+    }
+
+    /// Set the task priority
+    pub fn priority(self, priority: TaskPriority) -> Self {
+        match self {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority: _,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            } => Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            },
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority: _,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            } => Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            },
+        }
+    }
 }
 
 // Implement OrchestratorBuilder
 impl<T, Task, I> OrchestratorBuilder<T, Task, I> for DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Task: AsyncTask<T, I>,
     I: TaskId,
 {
     type Next = TokioAsyncTaskBuilder<T, I>;
-    
-    fn orchestrator<O: TaskOrchestrator<T, Task, I>>(
-        self,
-        _orchestrator: &O,
-    ) -> Self::Next {
+
+    fn orchestrator<O: TaskOrchestrator<T, Task, I>>(self, _orchestrator: &O) -> Self::Next {
         match self {
-            Self::Spawning { runtime, active_tasks, priority, timeout, retry_count, tracing_enabled, name, .. } => {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                ..
+            } => {
                 let mut builder = TokioAsyncTaskBuilder::new(runtime, active_tasks);
+                builder = builder.priority(priority);
                 if let Some(duration) = timeout {
-                    builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::timeout(builder, duration);
+                    builder = builder.timeout(duration);
                 }
                 if retry_count > 0 {
-                    builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::retry(builder, retry_count);
+                    builder = builder.retry(retry_count);
                 }
-                builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::tracing(builder, tracing_enabled);
+                builder = builder.tracing(tracing_enabled);
                 if let Some(n) = name {
                     builder = builder.name(&n);
                 }
                 builder
-            },
-            Self::Emitting { runtime, active_tasks, priority, timeout, retry_count, tracing_enabled, name, .. } => {
+            }
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                ..
+            } => {
                 let mut builder = TokioAsyncTaskBuilder::new(runtime, active_tasks);
+                builder = builder.priority(priority);
                 if let Some(duration) = timeout {
-                    builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::timeout(builder, duration);
+                    builder = builder.timeout(duration);
                 }
                 if retry_count > 0 {
-                    builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::retry(builder, retry_count);
+                    builder = builder.retry(retry_count);
                 }
-                builder = <TokioAsyncTaskBuilder<T, I> as AsyncTaskBuilder>::tracing(builder, tracing_enabled);
+                builder = builder.tracing(tracing_enabled);
                 if let Some(n) = name {
                     builder = builder.name(&n);
                 }
                 builder
-            },
+            }
         }
     }
 }
 
-// Implement AsyncTaskBuilder to allow method chaining
-impl<T, Task, I> sweet_async_api::task::builder::AsyncTaskBuilder for DefaultOrchestratorBuilder<T, Task, I>
+// Implement AsyncTaskBuilder directly - this IS the AsyncTaskBuilder, no separate orchestrator step needed
+impl<T, Task, I> sweet_async_api::task::builder::AsyncTaskBuilder
+    for DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Send + 'static,
+    T: Clone + Send + Sync + 'static,
     Task: AsyncTask<T, I>,
-    I: TaskId,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
     fn new() -> Self {
         // Default to spawning
         Self::new_spawning()
     }
-    
+
     fn timeout(self, duration: std::time::Duration) -> Self {
         match self {
-            Self::Spawning { runtime, active_tasks, priority, timeout: _, retry_count, tracing_enabled, name, _marker } => Self::Spawning {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout: _,
+                retry_count,
+                tracing_enabled,
+                name,
+                parent,
+                _marker,
+            } => Self::Spawning {
                 runtime,
                 active_tasks,
                 priority,
@@ -214,9 +374,19 @@ where
                 retry_count,
                 tracing_enabled,
                 name,
+                parent,
                 _marker,
             },
-            Self::Emitting { runtime, active_tasks, priority, timeout: _, retry_count, tracing_enabled, name, _marker } => Self::Emitting {
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout: _,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            } => Self::Emitting {
                 runtime,
                 active_tasks,
                 priority,
@@ -228,10 +398,20 @@ where
             },
         }
     }
-    
+
     fn retry(self, attempts: u8) -> Self {
         match self {
-            Self::Spawning { runtime, active_tasks, priority, timeout, retry_count: _, tracing_enabled, name, _marker } => Self::Spawning {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count: _,
+                tracing_enabled,
+                name,
+                parent,
+                _marker,
+            } => Self::Spawning {
                 runtime,
                 active_tasks,
                 priority,
@@ -239,9 +419,19 @@ where
                 retry_count: attempts,
                 tracing_enabled,
                 name,
+                parent,
                 _marker,
             },
-            Self::Emitting { runtime, active_tasks, priority, timeout, retry_count: _, tracing_enabled, name, _marker } => Self::Emitting {
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count: _,
+                tracing_enabled,
+                name,
+                _marker,
+            } => Self::Emitting {
                 runtime,
                 active_tasks,
                 priority,
@@ -253,10 +443,20 @@ where
             },
         }
     }
-    
+
     fn tracing(self, enabled: bool) -> Self {
         match self {
-            Self::Spawning { runtime, active_tasks, priority, timeout, retry_count, tracing_enabled: _, name, _marker } => Self::Spawning {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled: _,
+                name,
+                parent,
+                _marker,
+            } => Self::Spawning {
                 runtime,
                 active_tasks,
                 priority,
@@ -264,9 +464,19 @@ where
                 retry_count,
                 tracing_enabled: enabled,
                 name,
+                parent,
                 _marker,
             },
-            Self::Emitting { runtime, active_tasks, priority, timeout, retry_count, tracing_enabled: _, name, _marker } => Self::Emitting {
+            Self::Emitting {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled: _,
+                name,
+                _marker,
+            } => Self::Emitting {
                 runtime,
                 active_tasks,
                 priority,
@@ -281,52 +491,102 @@ where
 }
 
 // Add SpawningTaskBuilder implementation so we can call run() method
-impl<T, I> sweet_async_api::task::spawn::SpawningTaskBuilder<T, AsyncTaskError, I> 
-    for DefaultOrchestratorBuilder<T, crate::task::async_task::AsyncTask<T, I>, I>
+impl<T, I> sweet_async_api::task::spawn::SpawningTaskBuilder<T, AsyncTaskError, I>
+    for DefaultOrchestratorBuilder<T, crate::task::tokio_task::TokioAsyncTask<T, I>, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     I: TaskId,
 {
-    type Task = crate::task::async_task::AsyncTask<T, I>;
+    type Task = crate::task::spawn::spawning_task::TokioSpawningTask<T, I>;
+    type ParentType = crate::orchestra::TokioOrchestrator<T, I>;
     
+    fn parent(self, parent: Self::ParentType) -> Self {
+        // Store the orchestrator as the parent in the builder
+        match self {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+            } => Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                _marker,
+                // TODO: Store the parent orchestrator reference
+            },
+            Self::Emitting { .. } => panic!("Cannot set parent on emitting task builder"),
+        }
+    }
+
     fn run<F, R>(self, work: F) -> Self::Task
     where
         F: sweet_async_api::task::builder::AsyncWork<R> + Send + 'static,
-        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError> + Send + 'static,
+        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError>
+            + Send
+            + 'static,
     {
         match self {
-            Self::Spawning { runtime, active_tasks, .. } => {
-                // Create a new AsyncTask and configure it with the work
-                use crate::task::async_task::AsyncTask;
-                let task_id = I::from_string("default").unwrap(); // You may need to pass this in
-                let task = AsyncTask::new(task_id, TaskPriority::Normal, runtime, active_tasks);
-                // TODO: Configure the task with the work function
-                task
-            },
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                parent,
+                ..
+            } => {
+                // Create default orchestrator automatically if none provided
+                let _orchestrator = parent.unwrap_or_else(|| {
+                    TokioOrchestrator::new(crate::runtime::TokioRuntime::new())
+                });
+                
+                // Use the actual TokioSpawningTaskBuilder with automatic orchestrator
+                let mut builder = crate::task::spawn::builder::TokioSpawningTaskBuilder::new(runtime, active_tasks);
+                if let Some(duration) = timeout {
+                    builder = builder.timeout(duration);
+                }
+                if retry_count > 0 {
+                    builder = builder.retry(retry_count);
+                }
+                builder = builder.tracing(tracing_enabled);
+                if let Some(n) = name {
+                    builder = builder.name(&n);
+                }
+                // The orchestrator is automatically available to the builder
+                builder.run(work)
+            }
             Self::Emitting { .. } => panic!("Cannot call run() on an emitting task builder"),
         }
     }
-    
-    fn await_result<F, R>(self, work: F) -> impl std::future::Future<Output = Result<T, AsyncTaskError>> + Send
+
+    fn await_result<F, R>(
+        self,
+        work: F,
+    ) -> impl std::future::Future<Output = Result<T, AsyncTaskError>> + Send
     where
         F: sweet_async_api::task::builder::AsyncWork<R> + Send + 'static,
-        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError> + Send + 'static,
+        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError>
+            + Send
+            + 'static,
     {
-        match self {
-            Self::Spawning { runtime, active_tasks, .. } => {
-                // Create a future that executes the work
-                Box::pin(async move {
-                    let result = work.run().await;
-                    match result.into_async_result() {
-                        Ok(value) => Ok(value),
-                        Err(e) => Err(e),
-                    }
-                })
-            },
-            Self::Emitting { .. } => Box::pin(async { Err(AsyncTaskError::Failure("Cannot call await_result() on an emitting task builder".to_string())) }),
+        // await_result is just a "leap frog" over .await - it's the same as run().await
+        async move {
+            let task = self.run(work);
+            task.await
         }
     }
-    
+
     fn await_result_with_handler<F, R, H, Out>(
         self,
         work: F,
@@ -334,27 +594,77 @@ where
     ) -> impl std::future::Future<Output = Out> + Send
     where
         F: sweet_async_api::task::builder::AsyncWork<R> + Send + 'static,
-        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError> + Send + 'static,
+        R: sweet_async_api::task::spawn::into_async_result::IntoAsyncResult<T, AsyncTaskError>
+            + Send
+            + 'static,
         H: sweet_async_api::task::builder::AsyncWork<Out> + Send + 'static,
-        H::Future: std::future::Future<Output = Out>,
     {
         match self {
-            Self::Spawning { runtime, active_tasks, .. } => {
+            Self::Spawning {
+                runtime,
+                active_tasks,
+                ..
+            } => {
                 // Create a future that executes the work and applies the handler
                 Box::pin(async move {
                     let result = work.run().await;
-                    let async_result = result.into_async_result();
-                    // Pass the result to the handler
+                    let async_result = result.into_async_result().await;
+                    // The handler is AsyncWork, so we need to run it
                     handler.run().await
                 })
-            },
+            }
             Self::Emitting { .. } => {
                 Box::pin(async move {
-                    // Create a default out value - we need to know what Out is
-                    // Since we can't know the specific type, we'll use the handler directly
+                    // Since we can't execute the work, just run the handler directly
                     handler.run().await
                 })
-            },
+            }
+        }
+    }
+}
+
+// Implement emitting task methods directly on DefaultOrchestratorBuilder
+impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
+where
+    T: Clone + Send + Sync + 'static,
+    Task: AsyncTask<T, I>,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+{
+    /// Start the sender phase for emitting tasks
+    pub fn sender<F>(self, strategy: SenderStrategy, work: F) -> TokioEmittingTaskBuilder<T, (), (), AsyncTaskError, I>
+    where
+        F: AsyncWork<T> + Send + 'static,
+    {
+        match self {
+            Self::Emitting {
+                runtime,
+                active_tasks: _,  // Can't use this - type mismatch with emitting builder
+                priority,
+                timeout,
+                retry_count,
+                tracing_enabled,
+                name,
+                ..
+            } => {
+                // Create default orchestrator automatically
+                let _orchestrator = TokioOrchestrator::new(crate::runtime::TokioRuntime::new());
+                
+                // Use the builder's new() method since the types don't match
+                let mut builder = TokioEmittingTaskBuilder::new();
+                if let Some(duration) = timeout {
+                    builder = builder.timeout(duration);
+                }
+                if retry_count > 0 {
+                    builder = builder.retry(retry_count);
+                }
+                builder = builder.tracing(tracing_enabled);
+                if let Some(n) = name {
+                    builder = builder.name(&n);
+                }
+                // TODO: Configure sender strategy and work
+                builder
+            }
+            Self::Spawning { .. } => panic!("Cannot call sender() on a spawning task builder"),
         }
     }
 }

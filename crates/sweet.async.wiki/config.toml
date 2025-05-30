@@ -1,0 +1,59 @@
+# The URL the site will be built for
+base_url = "https://sweet.async.wiki"
+
+# Whether to automatically compile all Sass files in the sass directory
+compile_sass = true
+
+# Whether to build a search index to be used later on by a JavaScript library
+build_search_index = true
+
+# The site title
+title = "sweet.async.wiki"
+
+# The site description
+description = "Immutable, fluent builder for async Rust tasks with structured concurrency"
+
+# The default language
+default_language = "en"
+
+# Whether to do syntax highlighting
+highlight_code = true
+
+# The theme to use for code highlighting
+highlight_theme = "OneHalfDark"
+
+# When set to "true", a feed is automatically generated.
+generate_feeds = true
+
+# The filenames to use for the feeds
+feed_filenames = ["atom.xml"]
+
+# Whether to generate a sitemap
+generate_sitemap = true
+
+[markdown]
+# Whether to do syntax highlighting
+highlight_code = true
+
+# A list of directories used to search for additional `.sublime-syntax` and `.tmTheme` files.
+extra_syntaxes_and_themes = []
+
+# The theme to use for code highlighting.
+# See below for list of allowed values.
+highlight_theme = "OneHalfDark"
+
+# Configure the link checker
+[link_checker]
+# Skip link checking for external URLs that start with these prefixes
+skip_prefixes = ["http://[", "https://["]
+
+[slugify]
+paths = "safe"
+taxonomies = "safe"
+anchors = "safe"
+
+[extra]
+# Put all your custom variables here
+author = "David Maple"
+github = "https://github.com/yourrepo/sweet-async"
+twitter = "@kloudsamurai"

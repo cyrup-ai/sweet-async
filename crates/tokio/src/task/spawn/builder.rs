@@ -11,8 +11,8 @@ use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::SpawningTaskBuilder;
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
 
-use crate::task::async_task::AsyncTask;
-use crate::task::builder::TokioAsyncTaskBuilder;
+use crate::task::TokioAsyncTaskBuilder;
+use crate::task::spawn::spawning_task::TokioSpawningTask;
 
 /// Builder for creating and configuring spawning tasks
 ///
@@ -133,7 +133,13 @@ where
     I: TaskId,
     E: Into<AsyncTaskError> + From<AsyncTaskError>,
 {
-    type Task = AsyncTask<T, I>;
+    type Task = TokioSpawningTask<T, I>;
+    type ParentType = ();
+
+    fn parent(self, _parent: Self::ParentType) -> Self {
+        // For now, we don't track parent relationships
+        self
+    }
 
     /// Create a task with the given work function
     fn run<F, R>(self, work: F) -> Self::Task
@@ -161,69 +167,8 @@ where
             I::from_string(&fallback_id).expect("Failed to create task ID even with fallback")
         });
 
-        // Create the AsyncTask with the future
-        let mut task = AsyncTask::new(
-            id,
-            self.priority,
-            self.base.runtime().clone(),
-            self.base.active_tasks().clone(),
-        );
-
-        // Apply configuration
-        if let Some(name) = self.base.get_name() {
-            task = task.with_name(name);
-        }
-
-        let timeout_duration = self.base.get_timeout();
-        if timeout_duration > std::time::Duration::from_secs(0) {
-            task = task.with_timeout(timeout_duration);
-        }
-
-        let retry_count = self.base.get_retry_attempts();
-        if retry_count > 0 {
-            task = task.with_retry(retry_count);
-        }
-
-        let tracing_enabled = self.base.is_tracing_enabled();
-        if tracing_enabled {
-            task = task.with_tracing(tracing_enabled);
-        }
-
-        // Create the future that will execute the work
-        let runtime = self.base.runtime().clone();
-
-        // First create the future that runs the original work
-        let work_future = work.run();
-
-        // Then convert it to the expected result type
-        let result_future = async move {
-            // Execute the work and get the result
-            let result = work_future.await;
-
-            // Convert the result to the expected type
-            result.into_async_result()
-        };
-
-        // This gives us a future that returns a future that returns the result
-        // We need to await that inner future too
-        let final_future = async move {
-            // Await the inner future to get the final Result<T, E>
-            let result_future = result_future.await;
-            let final_result = result_future.await;
-
-            // Convert the error type if needed
-            match final_result {
-                Ok(value) => Ok(value),
-                Err(err) => Err(AsyncTaskError::Failure(format!("Task failed: {}", err))),
-            }
-        };
-
-        // Add the future to the task
-        let boxed_future: Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send>> =
-            Box::pin(final_future);
-        task = task.with_future(boxed_future);
-
-        task
+        // Create a spawning task with the provided work
+        TokioSpawningTask::new(id, work)
     }
 
     /// Create and immediately await a task

@@ -11,8 +11,8 @@ sweet_async_tokio = { path = "../tokio", optional = true }
 tokio = { workspace = true, optional = true }
 clap = { workspace = true, features = ["derive"] }
 crossterm = { workspace = true }
-ratatui = { workspace = true }
-
+ratatui = { workspace = true, features = ["serde"] }
+cryypt = { workspace = true }
 # Features
 [features]
 tokio = ["dep:sweet_async_tokio", "dep:tokio"]

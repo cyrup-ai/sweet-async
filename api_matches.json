@@ -1,0 +1,1262 @@
+[
+{
+  "text": "pub trait RuntimeBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {\n    /// Create a new runtime builder with default settings\n    fn new() -> Self;\n    \n    /// Set the number of worker threads for the runtime\n    fn worker_threads(self, count: usize) -> Self;\n    \n    /// Set the stack size for worker threads\n    fn stack_size(self, size_bytes: usize) -> Self;\n    \n    /// Build and return a configured runtime\n    fn build(self) -> impl Runtime<T, I>;\n    \n}",
+  "range": {
+    "byteOffset": {
+      "start": 193,
+      "end": 661
+    },
+    "start": {
+      "line": 6,
+      "column": 0
+    },
+    "end": {
+      "line": 19,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/runtime/builder.rs",
+  "lines": "pub trait RuntimeBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {\n    /// Create a new runtime builder with default settings\n    fn new() -> Self;\n    \n    /// Set the number of worker threads for the runtime\n    fn worker_threads(self, count: usize) -> Self;\n    \n    /// Set the stack size for worker threads\n    fn stack_size(self, size_bytes: usize) -> Self;\n    \n    /// Build and return a configured runtime\n    fn build(self) -> impl Runtime<T, I>;\n    \n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTask<T: Clone + Send + 'static, I: crate::task::TaskId>:\n    PrioritizedTask<T>\n    + CancellableTask<T>\n    + TracingTask<T>\n    + TimedTask<T>\n    + ContextualizedTask<T, I>\n    + RecoverableTask<T>\n    + StatusEnabledTask<T>\n    + MetricsEnabledTask<T>\n    + NamedTask\n{\n    // For a Task resolving to an awaitable future\n    fn to<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;\n\n    // For a Task that sends and receives Stream events via channels\n    fn emits<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 423,
+      "end": 1043
+    },
+    "start": {
+      "line": 12,
+      "column": 0
+    },
+    "end": {
+      "line": 28,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/async_task.rs",
+  "lines": "pub trait AsyncTask<T: Clone + Send + 'static, I: crate::task::TaskId>:\n    PrioritizedTask<T>\n    + CancellableTask<T>\n    + TracingTask<T>\n    + TimedTask<T>\n    + ContextualizedTask<T, I>\n    + RecoverableTask<T>\n    + StatusEnabledTask<T>\n    + MetricsEnabledTask<T>\n    + NamedTask\n{\n    // For a Task resolving to an awaitable future\n    fn to<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;\n\n    // For a Task that sends and receives Stream events via channels\n    fn emits<R: Clone + Send + 'static, Task: AsyncTask<R, I>>() -> impl OrchestratorBuilder<R, Task, I>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait Orchestra<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:\n    Runtime<T, I> + TaskOrchestrator<T, Task, I> + AsyncTask<T, I>\n{\n    /// Initialize a new task execution context\n    ///\n    /// Creates a fresh execution context with the given configuration options.\n    /// The context tracks all tasks spawned within it and provides isolation.\n    ///\n    fn create_context(&self, name: &str) -> impl Orchestra<T, Task, I> + 'static;\n\n    /// Get the current task execution statistics\n    ///\n    /// Returns statistics about task execution, including counts of completed,\n    /// failed, and pending tasks, as well as average execution times.\n    ///\n    type Stats: ExecutionStats + Clone + Send + 'static;\n    type StatsTask: AsyncTask<Self::Stats, I>;\n    fn execution_stats(&self) -> Self::StatsTask;\n\n    /// Clear all completed tasks from the orchestra's tracking\n    ///\n    /// Removes all completed tasks from memory, freeing resources while\n    /// preserving running and pending tasks.\n    ///\n    fn clear_completed_tasks(&self) -> usize;\n\n    /// Override the default task priority for all tasks in this context\n    ///\n    /// Sets a new default priority that will be applied to all tasks spawned\n    /// in this context that don't explicitly specify a different priority.\n    ///\n    fn set_default_priority(&self, priority: TaskPriority);\n\n    /// Get the name of this orchestra context\n    ///\n    /// Returns the name assigned to this execution context.\n    ///\n    fn context_name(&self) -> &str;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 907,
+      "end": 2447
+    },
+    "start": {
+      "line": 23,
+      "column": 0
+    },
+    "end": {
+      "line": 61,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/mod.rs",
+  "lines": "pub trait Orchestra<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>:\n    Runtime<T, I> + TaskOrchestrator<T, Task, I> + AsyncTask<T, I>\n{\n    /// Initialize a new task execution context\n    ///\n    /// Creates a fresh execution context with the given configuration options.\n    /// The context tracks all tasks spawned within it and provides isolation.\n    ///\n    fn create_context(&self, name: &str) -> impl Orchestra<T, Task, I> + 'static;\n\n    /// Get the current task execution statistics\n    ///\n    /// Returns statistics about task execution, including counts of completed,\n    /// failed, and pending tasks, as well as average execution times.\n    ///\n    type Stats: ExecutionStats + Clone + Send + 'static;\n    type StatsTask: AsyncTask<Self::Stats, I>;\n    fn execution_stats(&self) -> Self::StatsTask;\n\n    /// Clear all completed tasks from the orchestra's tracking\n    ///\n    /// Removes all completed tasks from memory, freeing resources while\n    /// preserving running and pending tasks.\n    ///\n    fn clear_completed_tasks(&self) -> usize;\n\n    /// Override the default task priority for all tasks in this context\n    ///\n    /// Sets a new default priority that will be applied to all tasks spawned\n    /// in this context that don't explicitly specify a different priority.\n    ///\n    fn set_default_priority(&self, priority: TaskPriority);\n\n    /// Get the name of this orchestra context\n    ///\n    /// Returns the name assigned to this execution context.\n    ///\n    fn context_name(&self) -> &str;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ExecutionStats {\n    /// Number of tasks that have completed successfully\n    fn completed_count(&self) -> usize;\n\n    /// Number of tasks that have failed\n    fn failed_count(&self) -> usize;\n\n    /// Number of tasks currently running\n    fn running_count(&self) -> usize;\n\n    /// Number of tasks waiting to start\n    fn pending_count(&self) -> usize;\n\n    /// Average execution time across all completed tasks\n    fn avg_execution_time_ms(&self) -> f64;\n\n    /// Maximum execution time observed\n    fn max_execution_time_ms(&self) -> u64;\n\n    /// Minimum execution time observed\n    fn min_execution_time_ms(&self) -> u64;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2505,
+      "end": 3143
+    },
+    "start": {
+      "line": 64,
+      "column": 0
+    },
+    "end": {
+      "line": 85,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/mod.rs",
+  "lines": "pub trait ExecutionStats {\n    /// Number of tasks that have completed successfully\n    fn completed_count(&self) -> usize;\n\n    /// Number of tasks that have failed\n    fn failed_count(&self) -> usize;\n\n    /// Number of tasks currently running\n    fn running_count(&self) -> usize;\n\n    /// Number of tasks waiting to start\n    fn pending_count(&self) -> usize;\n\n    /// Average execution time across all completed tasks\n    fn avg_execution_time_ms(&self) -> f64;\n\n    /// Maximum execution time observed\n    fn max_execution_time_ms(&self) -> u64;\n\n    /// Minimum execution time observed\n    fn min_execution_time_ms(&self) -> u64;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait OrchestratorBuilder<\n    T: Clone + Send + 'static,\n    Task: crate::task::AsyncTask<T, I>,\n    I: crate::task::TaskId,\n>\n{\n    type Next: AsyncTaskBuilder;\n    fn orchestrator<O: crate::orchestra::TaskOrchestrator<T, Task, I>>(\n        self,\n        orchestrator: &O,\n    ) -> Self::Next;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 3222,
+      "end": 3523
+    },
+    "start": {
+      "line": 88,
+      "column": 0
+    },
+    "end": {
+      "line": 99,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/mod.rs",
+  "lines": "pub trait OrchestratorBuilder<\n    T: Clone + Send + 'static,\n    Task: crate::task::AsyncTask<T, I>,\n    I: crate::task::TaskId,\n>\n{\n    type Next: AsyncTaskBuilder;\n    fn orchestrator<O: crate::orchestra::TaskOrchestrator<T, Task, I>>(\n        self,\n        orchestrator: &O,\n    ) -> Self::Next;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TimeExt {\n    fn nanos(self) -> Duration;\n    fn micros(self) -> Duration;\n    fn millis(self) -> Duration;\n    fn seconds(self) -> Duration;\n    fn minutes(self) -> Duration;\n    fn hours(self) -> Duration;\n    fn days(self) -> Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 109,
+      "end": 359
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 11,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/time_ext.rs",
+  "lines": "pub trait TimeExt {\n    fn nanos(self) -> Duration;\n    fn micros(self) -> Duration;\n    fn millis(self) -> Duration;\n    fn seconds(self) -> Duration;\n    fn minutes(self) -> Duration;\n    fn hours(self) -> Duration;\n    fn days(self) -> Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TaskOrchestrator<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId> {\n    type RegisterTaskReturn;\n    type StartTaskFuture: Future<Output = Result<T, AsyncTaskError>> + Send;\n    type StartAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n    type JoinAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n    type StartGroupFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n\n    /// Register a new task with the orchestrator\n    ///\n    /// Adds a task to the orchestrator's management scope without starting execution.\n    ///\n    fn register_task(&self, task: Task) -> Self::RegisterTaskReturn;\n\n    /// Add a dependency relationship between tasks\n    ///\n    /// Specifies that one task depends on another, ensuring the dependent task\n    /// won't start until the dependency completes successfully.\n    ///\n    /// # Errors\n    ///\n    /// Returns `OrchestratorError::TaskNotFound` if either task doesn't exist.\n    /// Returns `OrchestratorError::DependencyCycle` if this would create a dependency cycle.\n    /// Returns `OrchestratorError::InvalidTaskState` if a task is in a state where\n    /// dependencies can't be added (e.g., already running or completed).\n    ///\n    fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError>;\n\n    /// Start execution of a specific task\n    ///\n    /// Begins execution of the task with the given ID, respecting any dependencies.\n    /// Returns a future that completes when the task is finished.\n    ///\n    fn start_task(&self, task_id: &I) -> Self::StartTaskFuture;\n\n    /// Start execution of all registered tasks\n    ///\n    /// Begins execution of all registered tasks, respecting dependencies.\n    /// Tasks will be scheduled according to their priorities and dependencies.\n    ///\n    fn start_all(&self) -> Self::StartAllFuture;\n\n    /// Cancel a specific task\n    ///\n    /// Attempts to cancel the task with the given ID. Also cancels any tasks\n    /// that depend on this task.\n    ///\n    /// Attempts to cancel the task with the given ID. Returns Ok(()) on success, or Err(OrchestratorError) if cancellation failed.\n    fn cancel_task(&self, task_id: &I) -> Result<(), OrchestratorError>;\n\n    /// Get the current status of a task\n    ///\n    /// Returns the current execution status of the task with the given ID.\n    ///\n    fn task_status(&self, task_id: &I) -> Option<TaskStatus>;\n\n    /// Get all tasks with their current status\n    ///\n    /// Returns a mapping of task IDs to their current execution status.\n    ///\n    fn all_task_statuses(&self) -> Vec<(I, TaskStatus)>;\n\n    /// Wait for all tasks to complete\n    ///\n    /// Returns a future that completes when all registered tasks have finished\n    /// execution, either successfully or with an error.\n    ///\n    fn join_all(&self) -> Self::JoinAllFuture;\n\n    /// Create a task group for batch operations\n    ///\n    /// Creates a named group that can be used to organize and manage related tasks.\n    /// Groups allow operations to be performed on multiple tasks at once.\n    ///\n    /// Creates a named group for organizing related tasks. Returns Ok(()) if the group was created, or Err(OrchestratorError) if creation failed.\n    fn create_group(&self, group_name: &str) -> Result<(), OrchestratorError>;\n\n    /// Add a task to a group\n    ///\n    /// Associates a task with a named group for batch operations.\n    ///\n    /// Associates a task with a named group. Returns Ok(()) if successful, or Err(OrchestratorError) if the operation failed.\n    fn add_task_to_group(&self, task_id: &I, group_name: &str) -> Result<(), OrchestratorError>;\n\n    /// Start all tasks in a group\n    ///\n    /// Begins execution of all tasks in the specified group, respecting dependencies.\n    ///\n    fn start_group(&self, group_name: &str) -> Self::StartGroupFuture;\n\n    /// Cancel all tasks in a group\n    ///\n    /// Attempts to cancel all tasks in the specified group.\n    ///\n    fn cancel_group(&self, group_name: &str) -> usize;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 978,
+      "end": 5046
+    },
+    "start": {
+      "line": 34,
+      "column": 0
+    },
+    "end": {
+      "line": 128,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/orchestrator.rs",
+  "lines": "pub trait TaskOrchestrator<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId> {\n    type RegisterTaskReturn;\n    type StartTaskFuture: Future<Output = Result<T, AsyncTaskError>> + Send;\n    type StartAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n    type JoinAllFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n    type StartGroupFuture: Future<Output = Vec<(I, Result<T, AsyncTaskError>)>> + Send;\n\n    /// Register a new task with the orchestrator\n    ///\n    /// Adds a task to the orchestrator's management scope without starting execution.\n    ///\n    fn register_task(&self, task: Task) -> Self::RegisterTaskReturn;\n\n    /// Add a dependency relationship between tasks\n    ///\n    /// Specifies that one task depends on another, ensuring the dependent task\n    /// won't start until the dependency completes successfully.\n    ///\n    /// # Errors\n    ///\n    /// Returns `OrchestratorError::TaskNotFound` if either task doesn't exist.\n    /// Returns `OrchestratorError::DependencyCycle` if this would create a dependency cycle.\n    /// Returns `OrchestratorError::InvalidTaskState` if a task is in a state where\n    /// dependencies can't be added (e.g., already running or completed).\n    ///\n    fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError>;\n\n    /// Start execution of a specific task\n    ///\n    /// Begins execution of the task with the given ID, respecting any dependencies.\n    /// Returns a future that completes when the task is finished.\n    ///\n    fn start_task(&self, task_id: &I) -> Self::StartTaskFuture;\n\n    /// Start execution of all registered tasks\n    ///\n    /// Begins execution of all registered tasks, respecting dependencies.\n    /// Tasks will be scheduled according to their priorities and dependencies.\n    ///\n    fn start_all(&self) -> Self::StartAllFuture;\n\n    /// Cancel a specific task\n    ///\n    /// Attempts to cancel the task with the given ID. Also cancels any tasks\n    /// that depend on this task.\n    ///\n    /// Attempts to cancel the task with the given ID. Returns Ok(()) on success, or Err(OrchestratorError) if cancellation failed.\n    fn cancel_task(&self, task_id: &I) -> Result<(), OrchestratorError>;\n\n    /// Get the current status of a task\n    ///\n    /// Returns the current execution status of the task with the given ID.\n    ///\n    fn task_status(&self, task_id: &I) -> Option<TaskStatus>;\n\n    /// Get all tasks with their current status\n    ///\n    /// Returns a mapping of task IDs to their current execution status.\n    ///\n    fn all_task_statuses(&self) -> Vec<(I, TaskStatus)>;\n\n    /// Wait for all tasks to complete\n    ///\n    /// Returns a future that completes when all registered tasks have finished\n    /// execution, either successfully or with an error.\n    ///\n    fn join_all(&self) -> Self::JoinAllFuture;\n\n    /// Create a task group for batch operations\n    ///\n    /// Creates a named group that can be used to organize and manage related tasks.\n    /// Groups allow operations to be performed on multiple tasks at once.\n    ///\n    /// Creates a named group for organizing related tasks. Returns Ok(()) if the group was created, or Err(OrchestratorError) if creation failed.\n    fn create_group(&self, group_name: &str) -> Result<(), OrchestratorError>;\n\n    /// Add a task to a group\n    ///\n    /// Associates a task with a named group for batch operations.\n    ///\n    /// Associates a task with a named group. Returns Ok(()) if successful, or Err(OrchestratorError) if the operation failed.\n    fn add_task_to_group(&self, task_id: &I, group_name: &str) -> Result<(), OrchestratorError>;\n\n    /// Start all tasks in a group\n    ///\n    /// Begins execution of all tasks in the specified group, respecting dependencies.\n    ///\n    fn start_group(&self, group_name: &str) -> Self::StartGroupFuture;\n\n    /// Cancel all tasks in a group\n    ///\n    /// Attempts to cancel all tasks in the specified group.\n    ///\n    fn cancel_group(&self, group_name: &str) -> usize;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTaskBuilder: Sized {\n    /// Sets a descriptive name for the task.\n\n    /// Sets a timeout duration for task execution.\n    fn timeout(self, duration: std::time::Duration) -> Self;\n    /// Sets the task's execution priority.\n\n    /// Configure the number of retry attempts for failures\n    fn retry(self, attempts: u8) -> Self;\n    /// Enable or disable detailed execution tracing\n    fn tracing(self, enabled: bool) -> Self;\n\n    /// Create a new builder instance (internal method)\n    #[doc(hidden)]\n    fn new() -> Self;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1576,
+      "end": 2116
+    },
+    "start": {
+      "line": 56,
+      "column": 0
+    },
+    "end": {
+      "line": 71,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/builder.rs",
+  "lines": "pub trait AsyncTaskBuilder: Sized {\n    /// Sets a descriptive name for the task.\n\n    /// Sets a timeout duration for task execution.\n    fn timeout(self, duration: std::time::Duration) -> Self;\n    /// Sets the task's execution priority.\n\n    /// Configure the number of retry attempts for failures\n    fn retry(self, attempts: u8) -> Self;\n    /// Enable or disable detailed execution tracing\n    fn tracing(self, enabled: bool) -> Self;\n\n    /// Create a new builder instance (internal method)\n    #[doc(hidden)]\n    fn new() -> Self;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncWork<R> {\n    /// Execute the work and return a Future that resolves to the result\n    fn run(self) -> impl Future<Output = R> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2118,
+      "end": 2279
+    },
+    "start": {
+      "line": 73,
+      "column": 0
+    },
+    "end": {
+      "line": 76,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/builder.rs",
+  "lines": "pub trait AsyncWork<R> {\n    /// Execute the work and return a Future that resolves to the result\n    fn run(self) -> impl Future<Output = R> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SenderBuilder<\n    T: Clone + Send + 'static,\n    U: Send + 'static,\n    E: Send + 'static,\n    I: crate::task::task_id::TaskId,\n>: Sized\n{\n    type Receiver: ReceiverBuilder<T, U, E, I>;\n    type StreamProcessorReceiver<C: Send + 'static, Coll: Send + 'static>: ReceiverBuilder<T, Coll, E, I>;\n    /// Add a receiver to process task events with a collector\n    fn receiver(\n        self,\n        strategy: ReceiverStrategy,\n        receiver: fn(&T, &mut (), Uuid) -> U,\n    ) -> Self::Receiver;\n\n    /// Add a stream processor to process the entire event stream\n    fn stream_processor<C: Send + 'static, F, S, Coll: Send + 'static>(\n        self,\n        processor: F,\n        strategy: ReceiverStrategy,\n    ) -> Self::StreamProcessorReceiver<C, Coll>\n    where\n        F: AsyncWork<C> + Send + 'static,\n        S: Stream + Send + 'static,\n        S::Item: ReceiverEvent<T, C>,\n        C: Future<Output = ()> + Send + 'static,\n        Coll: Default + Send + 'static;\n\n    type EmittingTask: crate::task::emit::EmittingTask<T, U, E, I>;\n    fn run(self) -> Self::EmittingTask;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2597,
+      "end": 3687
+    },
+    "start": {
+      "line": 90,
+      "column": 0
+    },
+    "end": {
+      "line": 121,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/builder.rs",
+  "lines": "pub trait SenderBuilder<\n    T: Clone + Send + 'static,\n    U: Send + 'static,\n    E: Send + 'static,\n    I: crate::task::task_id::TaskId,\n>: Sized\n{\n    type Receiver: ReceiverBuilder<T, U, E, I>;\n    type StreamProcessorReceiver<C: Send + 'static, Coll: Send + 'static>: ReceiverBuilder<T, Coll, E, I>;\n    /// Add a receiver to process task events with a collector\n    fn receiver(\n        self,\n        strategy: ReceiverStrategy,\n        receiver: fn(&T, &mut (), Uuid) -> U,\n    ) -> Self::Receiver;\n\n    /// Add a stream processor to process the entire event stream\n    fn stream_processor<C: Send + 'static, F, S, Coll: Send + 'static>(\n        self,\n        processor: F,\n        strategy: ReceiverStrategy,\n    ) -> Self::StreamProcessorReceiver<C, Coll>\n    where\n        F: AsyncWork<C> + Send + 'static,\n        S: Stream + Send + 'static,\n        S::Item: ReceiverEvent<T, C>,\n        C: Future<Output = ()> + Send + 'static,\n        Coll: Default + Send + 'static;\n\n    type EmittingTask: crate::task::emit::EmittingTask<T, U, E, I>;\n    fn run(self) -> Self::EmittingTask;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ReceiverBuilder<\n    T: Clone + Send + 'static,\n    U: Send + 'static,\n    E: Send + 'static,\n    I: crate::task::task_id::TaskId,\n>: Sized\n{\n    type Task: crate::task::emit::EmittingTask<T, U, E, I>;\n    fn start_queue(self) -> Self::Task;\n    // Add more methods as needed for results handler, error strategy, etc.\n}",
+  "range": {
+    "byteOffset": {
+      "start": 3689,
+      "end": 4018
+    },
+    "start": {
+      "line": 123,
+      "column": 0
+    },
+    "end": {
+      "line": 133,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/builder.rs",
+  "lines": "pub trait ReceiverBuilder<\n    T: Clone + Send + 'static,\n    U: Send + 'static,\n    E: Send + 'static,\n    I: crate::task::task_id::TaskId,\n>: Sized\n{\n    type Task: crate::task::emit::EmittingTask<T, U, E, I>;\n    fn start_queue(self) -> Self::Task;\n    // Add more methods as needed for results handler, error strategy, etc.\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TimedTask<T: Send + 'static> {\n    fn created_timestamp(&self) -> SystemTime;\n    fn executed_timestamp(&self) -> SystemTime;\n    fn completed_timestamp(&self) -> SystemTime;\n    fn timeout(&self) -> Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 53,
+      "end": 274
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 8,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/timed_task.rs",
+  "lines": "pub trait TimedTask<T: Send + 'static> {\n    fn created_timestamp(&self) -> SystemTime;\n    fn executed_timestamp(&self) -> SystemTime;\n    fn completed_timestamp(&self) -> SystemTime;\n    fn timeout(&self) -> Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait MetricsEnabledTask<T: Send + 'static> {\n    type Cpu: CpuUsage;\n    type Memory: MemoryUsage;\n    type Io: IoUsage;\n\n    fn cpu_usage(&self) -> &Self::Cpu;\n    fn memory_usage(&self) -> &Self::Memory;\n    fn io_usage(&self) -> &Self::Io;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 52,
+      "end": 301
+    },
+    "start": {
+      "line": 2,
+      "column": 0
+    },
+    "end": {
+      "line": 10,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_metrics.rs",
+  "lines": "pub trait MetricsEnabledTask<T: Send + 'static> {\n    type Cpu: CpuUsage;\n    type Memory: MemoryUsage;\n    type Io: IoUsage;\n\n    fn cpu_usage(&self) -> &Self::Cpu;\n    fn memory_usage(&self) -> &Self::Memory;\n    fn io_usage(&self) -> &Self::Io;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TaskRelationships<T: Clone + Send + 'static, I: TaskId>: Send + Sync {\n    /// Associated type for parent channel sender\n    type ParentSender: Send + Sync;\n    \n    /// Associated type for parent channel receiver \n    type ParentReceiver: Send + Sync;\n    \n    /// Associated type for child channel sender\n    type ChildSender: Send + Sync;\n    \n    /// Associated type for child channel receiver\n    type ChildReceiver: Send + Sync;\n    \n    /// Get access to the parent channel sender\n    fn parent_sender(&self) -> Option<&Self::ParentSender>;\n    \n    /// Get access to the parent channel receiver\n    fn parent_receiver(&self) -> Option<&Self::ParentReceiver>;\n    \n    /// Get access to child channel senders\n    fn child_senders(&self) -> &[Self::ChildSender];\n    \n    /// Get access to child channel receivers\n    fn child_receivers(&self) -> &[Self::ChildReceiver];\n    \n    /// Add a child channel to this task's relationships\n    fn add_child_channel(&mut self, sender: Self::ChildSender, receiver: Self::ChildReceiver);\n    \n    /// Set the parent channel for this task\n    fn set_parent_channel(&mut self, sender: Self::ParentSender, receiver: Self::ParentReceiver);\n    \n    /// Check if this task has a parent\n    fn has_parent(&self) -> bool;\n    \n    /// Get the number of children\n    fn child_count(&self) -> usize;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 84,
+      "end": 1432
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 39,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_relationships.rs",
+  "lines": "pub trait TaskRelationships<T: Clone + Send + 'static, I: TaskId>: Send + Sync {\n    /// Associated type for parent channel sender\n    type ParentSender: Send + Sync;\n    \n    /// Associated type for parent channel receiver \n    type ParentReceiver: Send + Sync;\n    \n    /// Associated type for child channel sender\n    type ChildSender: Send + Sync;\n    \n    /// Associated type for child channel receiver\n    type ChildReceiver: Send + Sync;\n    \n    /// Get access to the parent channel sender\n    fn parent_sender(&self) -> Option<&Self::ParentSender>;\n    \n    /// Get access to the parent channel receiver\n    fn parent_receiver(&self) -> Option<&Self::ParentReceiver>;\n    \n    /// Get access to child channel senders\n    fn child_senders(&self) -> &[Self::ChildSender];\n    \n    /// Get access to child channel receivers\n    fn child_receivers(&self) -> &[Self::ChildReceiver];\n    \n    /// Add a child channel to this task's relationships\n    fn add_child_channel(&mut self, sender: Self::ChildSender, receiver: Self::ChildReceiver);\n    \n    /// Set the parent channel for this task\n    fn set_parent_channel(&mut self, sender: Self::ParentSender, receiver: Self::ParentReceiver);\n    \n    /// Check if this task has a parent\n    fn has_parent(&self) -> bool;\n    \n    /// Get the number of children\n    fn child_count(&self) -> usize;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TracingTask<T: Send + 'static> {\n    /// Handle an error that occurred during task execution\n    ///\n    /// This method is called when an error occurs during task execution.\n    /// It allows for custom error handling logic to be applied.\n    fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError>;\n\n    /// Record an error for later analysis\n    ///\n    /// This method logs the error with appropriate context for\n    /// later debugging and monitoring.\n    fn record_error(&self, error: &AsyncTaskError);\n\n    /// Check if tracing is enabled for this task\n    fn is_tracing_enabled(&self) -> bool;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2731,
+      "end": 3363
+    },
+    "start": {
+      "line": 78,
+      "column": 0
+    },
+    "end": {
+      "line": 93,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/tracing_task.rs",
+  "lines": "pub trait TracingTask<T: Send + 'static> {\n    /// Handle an error that occurred during task execution\n    ///\n    /// This method is called when an error occurs during task execution.\n    /// It allows for custom error handling logic to be applied.\n    fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError>;\n\n    /// Record an error for later analysis\n    ///\n    /// This method logs the error with appropriate context for\n    /// later debugging and monitoring.\n    fn record_error(&self, error: &AsyncTaskError);\n\n    /// Check if tracing is enabled for this task\n    fn is_tracing_enabled(&self) -> bool;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait Runtime<T: Clone + Send + 'static, I: crate::task::TaskId> {\n    /// Spawn a task with a specific priority\n    ///\n    /// Schedules a task for execution with an optional priority level.\n    /// The task must implement SpawningTask to ensure it can be properly executed.\n    ///\n    /// # Returns\n    ///\n    /// Returns the spawned task, which implements AsyncTask and can be awaited,\n    /// cancelled, or tracked for status updates.\n    ///\n    type SpawnedTask: AsyncTask<T, I> + Future<Output = Result<T, AsyncTaskError>>;\n    fn spawn(\n        &self,\n        task: impl crate::task::spawn::SpawningTask<T, I> + 'static,\n        priority: TaskPriority,\n    ) -> Self::SpawnedTask;\n\n    /// Block and wait for a task to complete\n    ///\n    /// Executes a future to completion on the current thread. This method will\n    /// block the current thread until the future completes.\n    ///\n    fn block_on<F, R>(&self, future: F) -> R\n    where\n        F: Future<Output = R> + Send,\n        R: Send + 'static;\n\n    /// Get the current number of active tasks\n    ///\n    /// Returns the number of tasks currently being managed by this runtime.\n    ///\n    fn active_task_count(&self) -> usize;\n\n    /// Shutdown the runtime, waiting for all tasks to complete\n    ///\n    /// Attempts to gracefully shut down the runtime, waiting for active tasks\n    /// to complete up to the specified timeout duration.\n    ///\n    /// # Returns\n    /// - `true` if all tasks completed successfully within the timeout\n    /// - `false` if the timeout was reached and some tasks were still running\n    ///\n    /// Attempts to gracefully shut down the runtime, waiting for active tasks to complete up to the specified timeout.\n    /// Returns Ok(()) if all tasks completed successfully, or Err(OrchestratorError) if the timeout was reached or shutdown failed.\n    fn shutdown(&self, timeout: Duration) -> Result<(), OrchestratorError>;\n\n    /// Check if the runtime is still running\n    ///\n    /// Returns true if the runtime is active and can accept new tasks,\n    /// false if it has been shut down or is in the process of shutting down.\n    ///\n    fn is_running(&self) -> bool;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 463,
+      "end": 2638
+    },
+    "start": {
+      "line": 14,
+      "column": 0
+    },
+    "end": {
+      "line": 67,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/orchestra/runtime/runtime_trait.rs",
+  "lines": "pub trait Runtime<T: Clone + Send + 'static, I: crate::task::TaskId> {\n    /// Spawn a task with a specific priority\n    ///\n    /// Schedules a task for execution with an optional priority level.\n    /// The task must implement SpawningTask to ensure it can be properly executed.\n    ///\n    /// # Returns\n    ///\n    /// Returns the spawned task, which implements AsyncTask and can be awaited,\n    /// cancelled, or tracked for status updates.\n    ///\n    type SpawnedTask: AsyncTask<T, I> + Future<Output = Result<T, AsyncTaskError>>;\n    fn spawn(\n        &self,\n        task: impl crate::task::spawn::SpawningTask<T, I> + 'static,\n        priority: TaskPriority,\n    ) -> Self::SpawnedTask;\n\n    /// Block and wait for a task to complete\n    ///\n    /// Executes a future to completion on the current thread. This method will\n    /// block the current thread until the future completes.\n    ///\n    fn block_on<F, R>(&self, future: F) -> R\n    where\n        F: Future<Output = R> + Send,\n        R: Send + 'static;\n\n    /// Get the current number of active tasks\n    ///\n    /// Returns the number of tasks currently being managed by this runtime.\n    ///\n    fn active_task_count(&self) -> usize;\n\n    /// Shutdown the runtime, waiting for all tasks to complete\n    ///\n    /// Attempts to gracefully shut down the runtime, waiting for active tasks\n    /// to complete up to the specified timeout duration.\n    ///\n    /// # Returns\n    /// - `true` if all tasks completed successfully within the timeout\n    /// - `false` if the timeout was reached and some tasks were still running\n    ///\n    /// Attempts to gracefully shut down the runtime, waiting for active tasks to complete up to the specified timeout.\n    /// Returns Ok(()) if all tasks completed successfully, or Err(OrchestratorError) if the timeout was reached or shutdown failed.\n    fn shutdown(&self, timeout: Duration) -> Result<(), OrchestratorError>;\n\n    /// Check if the runtime is still running\n    ///\n    /// Returns true if the runtime is active and can accept new tasks,\n    /// false if it has been shut down or is in the process of shutting down.\n    ///\n    fn is_running(&self) -> bool;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait NamedTask {\n    /// Get the task's name\n    fn name(&self) -> Option<&str>;\n    \n    /// Set the task's name\n    fn set_name(&mut self, name: String);\n}",
+  "range": {
+    "byteOffset": {
+      "start": 36,
+      "end": 198
+    },
+    "start": {
+      "line": 1,
+      "column": 0
+    },
+    "end": {
+      "line": 7,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/named_task.rs",
+  "lines": "pub trait NamedTask {\n    /// Get the task's name\n    fn name(&self) -> Option<&str>;\n    \n    /// Set the task's name\n    fn set_name(&mut self, name: String);\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait CpuUsage: Send + Sync + 'static {\n    /// CPU time used by this task in seconds\n    fn cpu_time(&self) -> Duration;\n\n    /// CPU utilization as a fraction (0.0 to 1.0 per core)\n    fn utilization(&self) -> f64;\n\n    /// CPU time in user mode\n    fn user_time(&self) -> Duration;\n\n    /// CPU time in system/kernel mode\n    fn system_time(&self) -> Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 90,
+      "end": 459
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 15,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/cpu_usage.rs",
+  "lines": "pub trait CpuUsage: Send + Sync + 'static {\n    /// CPU time used by this task in seconds\n    fn cpu_time(&self) -> Duration;\n\n    /// CPU utilization as a fraction (0.0 to 1.0 per core)\n    fn utilization(&self) -> f64;\n\n    /// CPU time in user mode\n    fn user_time(&self) -> Duration;\n\n    /// CPU time in system/kernel mode\n    fn system_time(&self) -> Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait IoUsage: Send + Sync + 'static {\n    /// Total number of bytes read\n    fn bytes_read(&self) -> u64;\n\n    /// Total number of bytes written\n    fn bytes_written(&self) -> u64;\n\n    /// Number of read operations performed\n    fn read_operations(&self) -> u64;\n\n    /// Number of write operations performed\n    fn write_operations(&self) -> u64;\n\n    /// Average latency for read operations\n    fn read_latency(&self) -> Duration;\n\n    /// Average latency for write operations\n    fn write_latency(&self) -> Duration;\n\n    /// Current IO operations per second\n    fn operations_per_second(&self) -> f64;\n\n    /// IO wait time (time spent waiting for IO operations)\n    fn io_wait_time(&self) -> Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 97,
+      "end": 811
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 27,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/io_usage.rs",
+  "lines": "pub trait IoUsage: Send + Sync + 'static {\n    /// Total number of bytes read\n    fn bytes_read(&self) -> u64;\n\n    /// Total number of bytes written\n    fn bytes_written(&self) -> u64;\n\n    /// Number of read operations performed\n    fn read_operations(&self) -> u64;\n\n    /// Number of write operations performed\n    fn write_operations(&self) -> u64;\n\n    /// Average latency for read operations\n    fn read_latency(&self) -> Duration;\n\n    /// Average latency for write operations\n    fn write_latency(&self) -> Duration;\n\n    /// Current IO operations per second\n    fn operations_per_second(&self) -> f64;\n\n    /// IO wait time (time spent waiting for IO operations)\n    fn io_wait_time(&self) -> Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ContextualizedTask<T: Clone + Send + 'static, I: crate::task::TaskId> {\n    type RuntimeType: Runtime<T, I>;\n    type RelationshipsType: TaskRelationships<T, I>;\n    \n    /// Get communication handles for this task's relationships\n    ///\n    /// Returns handles for communicating with parent and child tasks\n    /// through message passing channels.\n    fn relationships(&self) -> &Self::RelationshipsType;\n\n    /// Get mutable communication handles for this task's relationships\n    ///\n    /// Returns mutable handles for managing parent and child task communications.\n    fn relationships_mut(&mut self) -> &mut Self::RelationshipsType;\n\n    /// Get the runtime this task is running in\n    ///\n    /// Returns a reference to the runtime that is executing this task.\n    fn runtime(&self) -> &Self::RuntimeType;\n\n    /// Get the current working directory for task execution\n    ///\n    /// Returns the path that should be used as the working directory\n    /// for any filesystem operations performed by this task.\n    fn cwd(&self) -> PathBuf;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 426,
+      "end": 1484
+    },
+    "start": {
+      "line": 11,
+      "column": 0
+    },
+    "end": {
+      "line": 36,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_context.rs",
+  "lines": "pub trait ContextualizedTask<T: Clone + Send + 'static, I: crate::task::TaskId> {\n    type RuntimeType: Runtime<T, I>;\n    type RelationshipsType: TaskRelationships<T, I>;\n    \n    /// Get communication handles for this task's relationships\n    ///\n    /// Returns handles for communicating with parent and child tasks\n    /// through message passing channels.\n    fn relationships(&self) -> &Self::RelationshipsType;\n\n    /// Get mutable communication handles for this task's relationships\n    ///\n    /// Returns mutable handles for managing parent and child task communications.\n    fn relationships_mut(&mut self) -> &mut Self::RelationshipsType;\n\n    /// Get the runtime this task is running in\n    ///\n    /// Returns a reference to the runtime that is executing this task.\n    fn runtime(&self) -> &Self::RuntimeType;\n\n    /// Get the current working directory for task execution\n    ///\n    /// Returns the path that should be used as the working directory\n    /// for any filesystem operations performed by this task.\n    fn cwd(&self) -> PathBuf;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TaskId: Debug + Copy + Eq + Ord + Send + Sync + 'static {\n    /// Get the string representation of this task ID\n    fn to_string(&self) -> String;\n\n    /// Parse a task ID from a string representation\n    fn from_string(s: &str) -> Option<Self>\n    where\n        Self: Sized;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1507,
+      "end": 1794
+    },
+    "start": {
+      "line": 56,
+      "column": 0
+    },
+    "end": {
+      "line": 64,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_id.rs",
+  "lines": "pub trait TaskId: Debug + Copy + Eq + Ord + Send + Sync + 'static {\n    /// Get the string representation of this task ID\n    fn to_string(&self) -> String;\n\n    /// Parse a task ID from a string representation\n    fn from_string(s: &str) -> Option<Self>\n    where\n        Self: Sized;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait MemoryUsage: Send + Sync + 'static {\n    /// Current memory allocated by this task in bytes\n    fn current_bytes(&self) -> u64;\n\n    /// Peak memory usage by this task in bytes\n    fn peak_bytes(&self) -> u64;\n\n    /// Total number of allocations performed by this task\n    fn allocation_count(&self) -> u64;\n\n    /// Memory allocation rate (bytes per second)\n    fn allocation_rate(&self) -> f64;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 75,
+      "end": 484
+    },
+    "start": {
+      "line": 1,
+      "column": 0
+    },
+    "end": {
+      "line": 13,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/memory_usage.rs",
+  "lines": "pub trait MemoryUsage: Send + Sync + 'static {\n    /// Current memory allocated by this task in bytes\n    fn current_bytes(&self) -> u64;\n\n    /// Peak memory usage by this task in bytes\n    fn peak_bytes(&self) -> u64;\n\n    /// Total number of allocations performed by this task\n    fn allocation_count(&self) -> u64;\n\n    /// Memory allocation rate (bytes per second)\n    fn allocation_rate(&self) -> f64;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait RecoverableTask<T: Clone + Send + 'static> {\n    /// The type of fallback work that returns Result<T, AsyncTaskError>\n    type FallbackWork: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync;\n    \n    /// Attempt to recover from an error by executing fallback work\n    fn recover(&self, error: AsyncTaskError) -> impl Future<Output = Result<T, AsyncTaskError>> + Send;\n    \n    /// Check if recovery is possible for this error\n    fn can_recover_from(&self, error: &AsyncTaskError) -> bool;\n    \n    /// Get the fallback work that will be executed on recovery\n    fn fallback_work(&self) -> &Self::FallbackWork;\n    \n    /// Get the maximum retry count\n    fn max_retries(&self) -> u8;\n    \n    /// Get the current retry attempt number\n    fn current_retry(&self) -> u8;\n    \n    /// Get the retry strategy\n    fn retry_strategy(&self) -> RetryStrategy;\n    \n    /// Check if retries are exhausted\n    fn retries_exhausted(&self) -> bool {\n        self.current_retry() >= self.max_retries()\n    }\n}",
+  "range": {
+    "byteOffset": {
+      "start": 513,
+      "end": 1522
+    },
+    "start": {
+      "line": 18,
+      "column": 0
+    },
+    "end": {
+      "line": 44,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/recoverable_task.rs",
+  "lines": "pub trait RecoverableTask<T: Clone + Send + 'static> {\n    /// The type of fallback work that returns Result<T, AsyncTaskError>\n    type FallbackWork: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync;\n    \n    /// Attempt to recover from an error by executing fallback work\n    fn recover(&self, error: AsyncTaskError) -> impl Future<Output = Result<T, AsyncTaskError>> + Send;\n    \n    /// Check if recovery is possible for this error\n    fn can_recover_from(&self, error: &AsyncTaskError) -> bool;\n    \n    /// Get the fallback work that will be executed on recovery\n    fn fallback_work(&self) -> &Self::FallbackWork;\n    \n    /// Get the maximum retry count\n    fn max_retries(&self) -> u8;\n    \n    /// Get the current retry attempt number\n    fn current_retry(&self) -> u8;\n    \n    /// Get the retry strategy\n    fn retry_strategy(&self) -> RetryStrategy;\n    \n    /// Check if retries are exhausted\n    fn retries_exhausted(&self) -> bool {\n        self.current_retry() >= self.max_retries()\n    }\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait StatusEnabledTask<T: Send + 'static> {\n    fn status(&self) -> TaskStatus;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 130,
+      "end": 216
+    },
+    "start": {
+      "line": 9,
+      "column": 0
+    },
+    "end": {
+      "line": 11,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_status.rs",
+  "lines": "pub trait StatusEnabledTask<T: Send + 'static> {\n    fn status(&self) -> TaskStatus;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait CancellationResult {\n    /// Check if the cancellation was successful\n    fn is_success(&self) -> bool;\n\n    /// Check if the task timed out\n    fn is_timeout(&self) -> bool;\n\n    /// Check if the task failed\n    fn is_failure(&self) -> bool;\n\n    /// Check if the task was cancelled\n    fn is_cancelled(&self) -> bool;\n\n    /// Check if the task is still running\n    fn is_running(&self) -> bool;\n\n    /// Get the level at which the task was cancelled\n    fn cancellation_level(&self) -> CancellationLevel;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 3177,
+      "end": 3696
+    },
+    "start": {
+      "line": 87,
+      "column": 0
+    },
+    "end": {
+      "line": 105,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/cancellable_task.rs",
+  "lines": "pub trait CancellationResult {\n    /// Check if the cancellation was successful\n    fn is_success(&self) -> bool;\n\n    /// Check if the task timed out\n    fn is_timeout(&self) -> bool;\n\n    /// Check if the task failed\n    fn is_failure(&self) -> bool;\n\n    /// Check if the task was cancelled\n    fn is_cancelled(&self) -> bool;\n\n    /// Check if the task is still running\n    fn is_running(&self) -> bool;\n\n    /// Get the level at which the task was cancelled\n    fn cancellation_level(&self) -> CancellationLevel;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait CancellableTask<T: Send + 'static> {\n    /// Cancel the task with the given level of severity\n    ///\n    /// Allows specifying exactly how aggressively the task should\n    /// be terminated.\n    fn cancel(\n        &self,\n        level: CancellationLevel,\n    ) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Gracefully cancel the task, allowing it to clean up\n    ///\n    /// This is the preferred cancellation method when time permits,\n    /// as it allows the task to release resources properly.\n    fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Forcefully cancel the task with minimal cleanup\n    ///\n    /// For when graceful cancellation is taking too long or\n    /// when more urgent cancellation is needed.\n    fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Immediately terminate the task with no cleanup\n    ///\n    /// Only use this in emergency situations where the task\n    /// must be stopped immediately regardless of consequences.\n    fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Check if the task has been cancelled\n    ///\n    /// Returns whether a cancellation has been requested for this task.\n    fn is_cancelled(&self) -> bool;\n\n    /// Register a callback to be executed when the task is cancelled\n    ///\n    /// Allows registering cleanup or notification code to run when\n    /// cancellation occurs.\n    fn on_cancel<F, Fut>(&self, callback: F)\n    where\n        F: crate::task::builder::AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = ()> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 6667,
+      "end": 8363
+    },
+    "start": {
+      "line": 190,
+      "column": 0
+    },
+    "end": {
+      "line": 231,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/cancellable_task.rs",
+  "lines": "pub trait CancellableTask<T: Send + 'static> {\n    /// Cancel the task with the given level of severity\n    ///\n    /// Allows specifying exactly how aggressively the task should\n    /// be terminated.\n    fn cancel(\n        &self,\n        level: CancellationLevel,\n    ) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Gracefully cancel the task, allowing it to clean up\n    ///\n    /// This is the preferred cancellation method when time permits,\n    /// as it allows the task to release resources properly.\n    fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Forcefully cancel the task with minimal cleanup\n    ///\n    /// For when graceful cancellation is taking too long or\n    /// when more urgent cancellation is needed.\n    fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Immediately terminate the task with no cleanup\n    ///\n    /// Only use this in emergency situations where the task\n    /// must be stopped immediately regardless of consequences.\n    fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send;\n\n    /// Check if the task has been cancelled\n    ///\n    /// Returns whether a cancellation has been requested for this task.\n    fn is_cancelled(&self) -> bool;\n\n    /// Register a callback to be executed when the task is cancelled\n    ///\n    /// Allows registering cleanup or notification code to run when\n    /// cancellation occurs.\n    fn on_cancel<F, Fut>(&self, callback: F)\n    where\n        F: crate::task::builder::AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = ()> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SpawningTaskBuilder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTaskBuilder\n{\n    type Task: SpawningTask<T, I>;\n    type ParentType;\n    \n    /// Set the parent for this task\n    /// \n    /// This establishes a parent-child relationship where the Orchestra can be its own parent.\n    /// Child tasks can communicate with their parent through the TaskRelationships interface.\n    fn parent(self, parent: Self::ParentType) -> Self;\n    \n    /// Accepts a closure returning T, Result<T, E>, Future<Output = T>, or Future<Output = Result<T, E>>\n    fn run<F, R>(self, work: F) -> Self::Task\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static;\n\n    fn await_result<F, R>(self, work: F) -> impl Future<Output = Result<T, E>> + Send\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static;\n\n    fn await_result_with_handler<F, R, H, Out>(\n        self,\n        work: F,\n        handler: H,\n    ) -> impl Future<Output = Out> + Send\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static,\n        H: AsyncWork<Out> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 267,
+      "end": 1471
+    },
+    "start": {
+      "line": 9,
+      "column": 0
+    },
+    "end": {
+      "line": 41,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/spawn/builder.rs",
+  "lines": "pub trait SpawningTaskBuilder<T: Clone + Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTaskBuilder\n{\n    type Task: SpawningTask<T, I>;\n    type ParentType;\n    \n    /// Set the parent for this task\n    /// \n    /// This establishes a parent-child relationship where the Orchestra can be its own parent.\n    /// Child tasks can communicate with their parent through the TaskRelationships interface.\n    fn parent(self, parent: Self::ParentType) -> Self;\n    \n    /// Accepts a closure returning T, Result<T, E>, Future<Output = T>, or Future<Output = Result<T, E>>\n    fn run<F, R>(self, work: F) -> Self::Task\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static;\n\n    fn await_result<F, R>(self, work: F) -> impl Future<Output = Result<T, E>> + Send\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static;\n\n    fn await_result_with_handler<F, R, H, Out>(\n        self,\n        work: F,\n        handler: H,\n    ) -> impl Future<Output = Out> + Send\n    where\n        F: AsyncWork<R> + Send + 'static,\n        R: IntoAsyncResult<T, E> + Send + 'static,\n        H: AsyncWork<Out> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait RankableByPriority: Copy + Eq + Ord + Send + Sync + 'static {\n    /// Get the numeric value of this priority\n    fn as_u8(&self) -> u8;\n\n    /// Convert a raw numeric value to a priority\n    fn from_u8(value: u8) -> Self;\n\n    /// Get the default priority level\n    fn default_priority() -> Self;\n\n    /// Check if this priority is higher than another\n    fn is_higher_than(&self, other: &Self) -> bool;\n\n    /// Check if this priority is lower than another\n    fn is_lower_than(&self, other: &Self) -> bool;\n\n    /// Calculate the difference between two priorities\n    fn difference(&self, other: &Self) -> u8;\n\n    /// Get the highest possible priority\n    fn highest() -> Self;\n\n    /// Get the lowest possible priority\n    fn lowest() -> Self;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 3152,
+      "end": 3911
+    },
+    "start": {
+      "line": 87,
+      "column": 0
+    },
+    "end": {
+      "line": 111,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_priority.rs",
+  "lines": "pub trait RankableByPriority: Copy + Eq + Ord + Send + Sync + 'static {\n    /// Get the numeric value of this priority\n    fn as_u8(&self) -> u8;\n\n    /// Convert a raw numeric value to a priority\n    fn from_u8(value: u8) -> Self;\n\n    /// Get the default priority level\n    fn default_priority() -> Self;\n\n    /// Check if this priority is higher than another\n    fn is_higher_than(&self, other: &Self) -> bool;\n\n    /// Check if this priority is lower than another\n    fn is_lower_than(&self, other: &Self) -> bool;\n\n    /// Calculate the difference between two priorities\n    fn difference(&self, other: &Self) -> u8;\n\n    /// Get the highest possible priority\n    fn highest() -> Self;\n\n    /// Get the lowest possible priority\n    fn lowest() -> Self;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {\n    /// Get the priority of this task\n    fn priority(&self) -> &impl RankableByPriority;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 6134,
+      "end": 6295
+    },
+    "start": {
+      "line": 172,
+      "column": 0
+    },
+    "end": {
+      "line": 175,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/task_priority.rs",
+  "lines": "pub trait PrioritizedTask<T: Send + 'static>: MetricsEnabledTask<T> {\n    /// Get the priority of this task\n    fn priority(&self) -> &impl RankableByPriority;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait IntoAsyncResult<T, E>: Send + 'static {\n    fn into_async_result(self) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 134,
+      "end": 271
+    },
+    "start": {
+      "line": 4,
+      "column": 0
+    },
+    "end": {
+      "line": 6,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/spawn/into_async_result.rs",
+  "lines": "pub trait IntoAsyncResult<T, E>: Send + 'static {\n    fn into_async_result(self) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SpawningTask<T: Clone + Send + 'static, I: crate::task::TaskId>:\n    AsyncTask<T, I> + Send + 'static\n{\n    type OutputFuture: Future<Output = Self::TaskResult> + Send + 'static;\n    type TaskResult: TaskResult<T>;\n    type JoinChildrenFuture: Future<Output = Self::JoinChildrenResult> + Send + 'static;\n    type JoinChildrenResult: AsyncResult<Vec<I>>;\n\n    /// Run a new task from this one\n    type AsyncWork: crate::task::builder::AsyncWork<T> + Send + 'static;\n    fn run(self, work: Self::AsyncWork) -> Self;\n\n    /// Run a child task\n    fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture\n    where\n        R: Clone + Send + 'static,\n        Self: SpawningTask<R, I>;\n\n    /// Wait for all child tasks to complete\n    fn join_children(&self) -> Self::JoinChildrenFuture;\n\n    /// Get the task's unique identifier\n    fn task_id(&self) -> I;\n\n    /// Access the underlying value being created by this task\n    fn value(&self) -> Option<&T>;\n\n    /// Create a task that can be chained with others\n    fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture\n    where\n        F: AsyncWork<U> + Send + 'static,\n        U: Clone + Send + 'static,\n        Self: SpawningTask<U, I>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 623,
+      "end": 1860
+    },
+    "start": {
+      "line": 17,
+      "column": 0
+    },
+    "end": {
+      "line": 50,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/spawn/task.rs",
+  "lines": "pub trait SpawningTask<T: Clone + Send + 'static, I: crate::task::TaskId>:\n    AsyncTask<T, I> + Send + 'static\n{\n    type OutputFuture: Future<Output = Self::TaskResult> + Send + 'static;\n    type TaskResult: TaskResult<T>;\n    type JoinChildrenFuture: Future<Output = Self::JoinChildrenResult> + Send + 'static;\n    type JoinChildrenResult: AsyncResult<Vec<I>>;\n\n    /// Run a new task from this one\n    type AsyncWork: crate::task::builder::AsyncWork<T> + Send + 'static;\n    fn run(self, work: Self::AsyncWork) -> Self;\n\n    /// Run a child task\n    fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture\n    where\n        R: Clone + Send + 'static,\n        Self: SpawningTask<R, I>;\n\n    /// Wait for all child tasks to complete\n    fn join_children(&self) -> Self::JoinChildrenFuture;\n\n    /// Get the task's unique identifier\n    fn task_id(&self) -> I;\n\n    /// Access the underlying value being created by this task\n    fn value(&self) -> Option<&T>;\n\n    /// Create a task that can be chained with others\n    fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture\n    where\n        F: AsyncWork<U> + Send + 'static,\n        U: Clone + Send + 'static,\n        Self: SpawningTask<U, I>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait TaskResult<T>: Send + 'static {\n    /// Get the result of this task computation\n    fn result(&self) -> Result<&T, &AsyncTaskError>;\n\n    /// Consume the task and return just the result value\n    fn into_result(self) -> Result<T, AsyncTaskError>\n    where\n        Self: Sized;\n\n    /// Check if this task's computation succeeded\n    fn is_ok(&self) -> bool;\n\n    /// Check if this task's computation failed with an error\n    fn is_err(&self) -> bool;\n\n    /// Get a reference to the success value, if available\n    fn as_ref(&self) -> Option<&T>;\n\n    /// Get a reference to the error value, if available\n    fn as_err(&self) -> Option<&AsyncTaskError>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 433,
+      "end": 1098
+    },
+    "start": {
+      "line": 11,
+      "column": 0
+    },
+    "end": {
+      "line": 31,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/spawn/result.rs",
+  "lines": "pub trait TaskResult<T>: Send + 'static {\n    /// Get the result of this task computation\n    fn result(&self) -> Result<&T, &AsyncTaskError>;\n\n    /// Consume the task and return just the result value\n    fn into_result(self) -> Result<T, AsyncTaskError>\n    where\n        Self: Sized;\n\n    /// Check if this task's computation succeeded\n    fn is_ok(&self) -> bool;\n\n    /// Check if this task's computation failed with an error\n    fn is_err(&self) -> bool;\n\n    /// Get a reference to the success value, if available\n    fn as_ref(&self) -> Option<&T>;\n\n    /// Get a reference to the error value, if available\n    fn as_err(&self) -> Option<&AsyncTaskError>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {\n    type AndThenFuture<U>: Future<Output = Self::AndThenResult<U>> + Send + 'static;\n    type AndThenResult<U>: TaskResult<U>;\n    type OrElseFuture: Future<Output = Self> + Send + 'static;\n    type MapResult<U>: AsyncResult<U>;\n    type MapErrResult: AsyncResult<T>;\n\n    /// Chain with another operation that returns a TaskResult\n    fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>\n    where\n        F: AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,\n        U: Send + 'static;\n\n    /// Chain with a function that handles errors\n    fn or_else<F, Fut>(self, f: F) -> Self::OrElseFuture\n    where\n        F: AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = Self> + Send + 'static;\n\n    /// Map the success value to another type\n    fn map<U, F>(self, f: F) -> Self::MapResult<U>\n    where\n        F: AsyncWork<U> + Send + 'static,\n        U: Send + 'static;\n\n    /// Map the error value to another error\n    fn map_err<F>(self, f: F) -> Self::MapErrResult\n    where\n        F: AsyncWork<AsyncTaskError> + Send + 'static;\n\n    /// Unwrap the result, returning the success value or panicking\n    fn unwrap(self) -> T\n    where\n        Self: Sized;\n\n    /// Unwrap the error, returning the error value or panicking\n    fn unwrap_err(self) -> AsyncTaskError\n    where\n        Self: Sized;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1351,
+      "end": 2779
+    },
+    "start": {
+      "line": 39,
+      "column": 0
+    },
+    "end": {
+      "line": 79,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/spawn/result.rs",
+  "lines": "pub trait AsyncResult<T>: TaskResult<T> + Send + 'static {\n    type AndThenFuture<U>: Future<Output = Self::AndThenResult<U>> + Send + 'static;\n    type AndThenResult<U>: TaskResult<U>;\n    type OrElseFuture: Future<Output = Self> + Send + 'static;\n    type MapResult<U>: AsyncResult<U>;\n    type MapErrResult: AsyncResult<T>;\n\n    /// Chain with another operation that returns a TaskResult\n    fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>\n    where\n        F: AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,\n        U: Send + 'static;\n\n    /// Chain with a function that handles errors\n    fn or_else<F, Fut>(self, f: F) -> Self::OrElseFuture\n    where\n        F: AsyncWork<Fut> + Send + 'static,\n        Fut: Future<Output = Self> + Send + 'static;\n\n    /// Map the success value to another type\n    fn map<U, F>(self, f: F) -> Self::MapResult<U>\n    where\n        F: AsyncWork<U> + Send + 'static,\n        U: Send + 'static;\n\n    /// Map the error value to another error\n    fn map_err<F>(self, f: F) -> Self::MapErrResult\n    where\n        F: AsyncWork<AsyncTaskError> + Send + 'static;\n\n    /// Unwrap the result, returning the success value or panicking\n    fn unwrap(self) -> T\n    where\n        Self: Sized;\n\n    /// Unwrap the error, returning the error value or panicking\n    fn unwrap_err(self) -> AsyncTaskError\n    where\n        Self: Sized;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTaskBuilder\n{\n    type SenderBuilder: SenderBuilder<T, C, E, I>;\n    /// Sets the sender for the emitting task.\n    fn sender<F>(self, sender: F, strategy: SenderStrategy) -> Self::SenderBuilder\n    where\n        F: crate::task::builder::AsyncWork<T> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 172,
+      "end": 558
+    },
+    "start": {
+      "line": 5,
+      "column": 0
+    },
+    "end": {
+      "line": 13,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/builder.rs",
+  "lines": "pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTaskBuilder\n{\n    type SenderBuilder: SenderBuilder<T, C, E, I>;\n    /// Sets the sender for the emitting task.\n    fn sender<F>(self, sender: F, strategy: SenderStrategy) -> Self::SenderBuilder\n    where\n        F: crate::task::builder::AsyncWork<T> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {\n    type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;\n    /// Sets the receiver for the sender builder.\n    fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder\n    where\n        F: crate::task::builder::AsyncWork<C> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 580,
+      "end": 953
+    },
+    "start": {
+      "line": 16,
+      "column": 0
+    },
+    "end": {
+      "line": 22,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/builder.rs",
+  "lines": "pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {\n    type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;\n    /// Sets the receiver for the sender builder.\n    fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder\n    where\n        F: crate::task::builder::AsyncWork<C> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ReceiverBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {\n    type Task: EmittingTask<T, C, E, I>;\n    fn run(self) -> Self::Task;\n    fn await_result(\n        self,\n    ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 975,
+      "end": 1280
+    },
+    "start": {
+      "line": 25,
+      "column": 0
+    },
+    "end": {
+      "line": 31,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/builder.rs",
+  "lines": "pub trait ReceiverBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {\n    type Task: EmittingTask<T, C, E, I>;\n    fn run(self) -> Self::Task;\n    fn await_result(\n        self,\n    ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait StreamingEvent<T>: Send + 'static {\n    /// When the event was created\n    fn created_timestamp(&self) -> &DateTime<Utc>;\n\n    /// When the event processing started\n    fn started_timestamp(&self) -> &DateTime<Utc>;\n\n    /// When the event processing completed\n    fn completed_timestamp(&self) -> &DateTime<Utc>;\n\n    /// Unique identifier for this event\n    fn event_id(&self) -> &Uuid;\n\n    /// Identifier of the task this event belongs to\n    fn task_id(&self) -> &Uuid;\n\n    /// Access the data payload of the event\n    fn data(&self) -> &T;\n\n    /// The type of this event\n    fn event_type(&self) -> &StreamingEventType<T>;\n\n    /// Whether this is the final event in a sequence\n    fn is_final(&self) -> bool;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 509,
+      "end": 1238
+    },
+    "start": {
+      "line": 19,
+      "column": 0
+    },
+    "end": {
+      "line": 43,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait StreamingEvent<T>: Send + 'static {\n    /// When the event was created\n    fn created_timestamp(&self) -> &DateTime<Utc>;\n\n    /// When the event processing started\n    fn started_timestamp(&self) -> &DateTime<Utc>;\n\n    /// When the event processing completed\n    fn completed_timestamp(&self) -> &DateTime<Utc>;\n\n    /// Unique identifier for this event\n    fn event_id(&self) -> &Uuid;\n\n    /// Identifier of the task this event belongs to\n    fn task_id(&self) -> &Uuid;\n\n    /// Access the data payload of the event\n    fn data(&self) -> &T;\n\n    /// The type of this event\n    fn event_type(&self) -> &StreamingEventType<T>;\n\n    /// Whether this is the final event in a sequence\n    fn is_final(&self) -> bool;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {\n    /// Collect an item with a specific key\n    fn collect<K>(&mut self, key: K, item: C)\n    where\n        K: Into<Uuid>;\n\n    /// Collect a single item (automatically generates a UUID key)\n    fn collect_item(&mut self, item: C);\n\n    /// Collect multiple items\n    fn collect_items(&mut self, items: Vec<C>);\n\n    /// Get all collected items\n    fn collected(&self) -> &Collection;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1299,
+      "end": 1760
+    },
+    "start": {
+      "line": 47,
+      "column": 0
+    },
+    "end": {
+      "line": 61,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {\n    /// Collect an item with a specific key\n    fn collect<K>(&mut self, key: K, item: C)\n    where\n        K: Into<Uuid>;\n\n    /// Collect a single item (automatically generates a UUID key)\n    fn collect_item(&mut self, item: C);\n\n    /// Collect multiple items\n    fn collect_items(&mut self, items: Vec<C>);\n\n    /// Get all collected items\n    fn collected(&self) -> &Collection;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SenderEventBuilder<T>: SenderEvent<T> + Send + 'static {\n    /// Create a new sender event builder\n    fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self;\n\n    /// Set the event type\n    fn event_type(self, event_type: StreamingEventType<T>) -> Self;\n\n    /// Update the event data\n    fn data(self, data: T) -> Self;\n\n    /// Mark this as the final event\n    fn is_final(self) -> Self;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1861,
+      "end": 2263
+    },
+    "start": {
+      "line": 65,
+      "column": 0
+    },
+    "end": {
+      "line": 77,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait SenderEventBuilder<T>: SenderEvent<T> + Send + 'static {\n    /// Create a new sender event builder\n    fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self;\n\n    /// Set the event type\n    fn event_type(self, event_type: StreamingEventType<T>) -> Self;\n\n    /// Update the event data\n    fn data(self, data: T) -> Self;\n\n    /// Mark this as the final event\n    fn is_final(self) -> Self;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SenderEvent<T>: StreamingEvent<T> + Send + 'static {\n    type Builder: SenderEventBuilder<T>;\n    /// Create a new builder for this event type\n    fn builder() -> Self::Builder;\n\n    /// Create a builder with specified event type\n    fn event_type(event_type: StreamingEventType<T>) -> Self::Builder;\n\n    /// Create a builder with specified data\n    fn data(data: T) -> Self::Builder;\n\n    /// Create a builder for a final event\n    fn is_final() -> Self::Builder;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2331,
+      "end": 2808
+    },
+    "start": {
+      "line": 81,
+      "column": 0
+    },
+    "end": {
+      "line": 94,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait SenderEvent<T>: StreamingEvent<T> + Send + 'static {\n    type Builder: SenderEventBuilder<T>;\n    /// Create a new builder for this event type\n    fn builder() -> Self::Builder;\n\n    /// Create a builder with specified event type\n    fn event_type(event_type: StreamingEventType<T>) -> Self::Builder;\n\n    /// Create a builder with specified data\n    fn data(data: T) -> Self::Builder;\n\n    /// Create a builder for a final event\n    fn is_final() -> Self::Builder;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ReceiverEvent<T, C>: Send + 'static {\n    /// Event identifier\n    fn event_id(&self) -> &Uuid;\n\n    /// Task identifier\n    fn task_id(&self) -> &Uuid;\n\n    /// Access the event data\n    fn data(&self) -> &T;\n\n    /// Get the event type\n    fn event_type(&self) -> &StreamingEventType<T>;\n\n    /// Whether this is the final event\n    fn is_final(&self) -> bool;\n\n    /// Access the collector for this event\n    fn collector(&self) -> &C;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2856,
+      "end": 3306
+    },
+    "start": {
+      "line": 97,
+      "column": 0
+    },
+    "end": {
+      "line": 115,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait ReceiverEvent<T, C>: Send + 'static {\n    /// Event identifier\n    fn event_id(&self) -> &Uuid;\n\n    /// Task identifier\n    fn task_id(&self) -> &Uuid;\n\n    /// Access the event data\n    fn data(&self) -> &T;\n\n    /// Get the event type\n    fn event_type(&self) -> &StreamingEventType<T>;\n\n    /// Whether this is the final event\n    fn is_final(&self) -> bool;\n\n    /// Access the collector for this event\n    fn collector(&self) -> &C;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait FinalEvent<T, C, Item, Collection = HashMap<Uuid, Item>>:\n    ReceiverEvent<T, C> + Send + 'static\n{\n    /// Access all collected items in their native collection\n    fn collected(&self) -> &Collection;\n\n    /// Get all collected items as a vector (for convenience)\n    fn yield_results(&self) -> Vec<Item>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 3396,
+      "end": 3715
+    },
+    "start": {
+      "line": 119,
+      "column": 0
+    },
+    "end": {
+      "line": 127,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/event.rs",
+  "lines": "pub trait FinalEvent<T, C, Item, Collection = HashMap<Uuid, Item>>:\n    ReceiverEvent<T, C> + Send + 'static\n{\n    /// Access all collected items in their native collection\n    fn collected(&self) -> &Collection;\n\n    /// Get all collected items as a vector (for convenience)\n    fn yield_results(&self) -> Vec<Item>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait SenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    Send + 'static\n{\n    type EmittingTaskType: EmittingTask<T, C, E, I>;\n    fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType\n    where\n        F: Fn(/* ... */) -> R + Send + 'static,\n        R: IntoAsyncResult<C, E> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 333,
+      "end": 711
+    },
+    "start": {
+      "line": 10,
+      "column": 0
+    },
+    "end": {
+      "line": 18,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/task.rs",
+  "lines": "pub trait SenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    Send + 'static\n{\n    type EmittingTaskType: EmittingTask<T, C, E, I>;\n    fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType\n    where\n        F: Fn(/* ... */) -> R + Send + 'static,\n        R: IntoAsyncResult<C, E> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait ReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    Send + 'static\n{\n    type EmittingTaskType: EmittingTask<T, C, E, I>;\n    fn emit_events<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType\n    where\n        F: Fn(/* ... */) -> R + Send + 'static,\n        R: IntoAsyncResult<C, E> + Send + 'static;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 733,
+      "end": 1116
+    },
+    "start": {
+      "line": 21,
+      "column": 0
+    },
+    "end": {
+      "line": 29,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/task.rs",
+  "lines": "pub trait ReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    Send + 'static\n{\n    type EmittingTaskType: EmittingTask<T, C, E, I>;\n    fn emit_events<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType\n    where\n        F: Fn(/* ... */) -> R + Send + 'static,\n        R: IntoAsyncResult<C, E> + Send + 'static;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTask<T, I> + Send + 'static\n{\n    type Final: FinalEvent<T, C, C>;\n\n    #[allow(dead_code)]\n    fn is_complete(&self) -> bool;\n    #[allow(dead_code)]\n    fn cancel(&self) -> Result<(), OrchestratorError>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 1118,
+      "end": 1434
+    },
+    "start": {
+      "line": 31,
+      "column": 0
+    },
+    "end": {
+      "line": 40,
+      "column": 1
+    }
+  },
+  "file": "crates/api/src/task/emit/task.rs",
+  "lines": "pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId>:\n    AsyncTask<T, I> + Send + 'static\n{\n    type Final: FinalEvent<T, C, C>;\n\n    #[allow(dead_code)]\n    fn is_complete(&self) -> bool;\n    #[allow(dead_code)]\n    fn cancel(&self) -> Result<(), OrchestratorError>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+}
+]

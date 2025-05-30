@@ -1,0 +1,170 @@
+[
+{
+  "text": "pub trait DurationExt {\n    /// Create a Duration from seconds\n    fn seconds(self) -> Duration;\n    \n    /// Create a Duration from milliseconds  \n    fn milliseconds(self) -> Duration;\n    \n    /// Create a Duration from minutes\n    fn minutes(self) -> Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 96,
+      "end": 362
+    },
+    "start": {
+      "line": 3,
+      "column": 0
+    },
+    "end": {
+      "line": 12,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/duration_ext.rs",
+  "lines": "pub trait DurationExt {\n    /// Create a Duration from seconds\n    fn seconds(self) -> Duration;\n    \n    /// Create a Duration from milliseconds  \n    fn milliseconds(self) -> Duration;\n    \n    /// Create a Duration from minutes\n    fn minutes(self) -> Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AutoScalable {\n    /// Configure auto-scaling with platform-specific implementation\n    type ScalingTask: AsyncTask<(), AsyncTaskError>;\n    fn configure_auto_scaling(&self, max_instances: u32) -> Self::ScalingTask;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 273,
+      "end": 500
+    },
+    "start": {
+      "line": 7,
+      "column": 0
+    },
+    "end": {
+      "line": 11,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/orchestra/deployment/auto_scale/mod.rs",
+  "lines": "pub trait AutoScalable {\n    /// Configure auto-scaling with platform-specific implementation\n    type ScalingTask: AsyncTask<(), AsyncTaskError>;\n    fn configure_auto_scaling(&self, max_instances: u32) -> Self::ScalingTask;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTaskTracing<T: Clone + Send + 'static, I: TaskId> {\n    /// Enable or disable tracing for this task\n    fn with_tracing(self, enabled: bool) -> Self;\n    \n    /// Check if this error type is retriable\n    fn is_retriable_error(&self, error: &AsyncTaskError) -> bool;\n    \n    /// Calculate backoff time for retries\n    fn calculate_backoff_time(&self, retry_number: u8) -> std::time::Duration;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 2041,
+      "end": 2451
+    },
+    "start": {
+      "line": 58,
+      "column": 0
+    },
+    "end": {
+      "line": 67,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/task/tracing_task.rs",
+  "lines": "pub trait AsyncTaskTracing<T: Clone + Send + 'static, I: TaskId> {\n    /// Enable or disable tracing for this task\n    fn with_tracing(self, enabled: bool) -> Self;\n    \n    /// Check if this error type is retriable\n    fn is_retriable_error(&self, error: &AsyncTaskError) -> bool;\n    \n    /// Calculate backoff time for retries\n    fn calculate_backoff_time(&self, retry_number: u8) -> std::time::Duration;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTaskContext<T: Clone + Send + 'static, I: TaskId> {\n    /// Set a parent task for this task\n    fn with_parent(self, parent: Box<dyn std::any::Any + Send + Sync>) -> Self;\n    \n    /// Add a child task to this task (async version)\n    fn add_child_async(&self, child: Box<dyn std::any::Any + Send + Sync>) -> Pin<Box<dyn Future<Output = ()> + Send>>;\n    \n    /// Get the runtime handle directly\n    fn runtime_handle(&self) -> &tokio::runtime::Handle;\n    \n    /// Set the current working directory for the task\n    fn with_cwd(self, path: PathBuf) -> Self;\n    \n    /// Set a name for the task\n    fn with_name(self, name: String) -> Self;\n    \n    /// Get the task name if set (async version)\n    fn name_async(&self) -> Pin<Box<dyn Future<Output = Option<String>> + Send>>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 690,
+      "end": 1484
+    },
+    "start": {
+      "line": 21,
+      "column": 0
+    },
+    "end": {
+      "line": 39,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/task/task_context.rs",
+  "lines": "pub trait AsyncTaskContext<T: Clone + Send + 'static, I: TaskId> {\n    /// Set a parent task for this task\n    fn with_parent(self, parent: Box<dyn std::any::Any + Send + Sync>) -> Self;\n    \n    /// Add a child task to this task (async version)\n    fn add_child_async(&self, child: Box<dyn std::any::Any + Send + Sync>) -> Pin<Box<dyn Future<Output = ()> + Send>>;\n    \n    /// Get the runtime handle directly\n    fn runtime_handle(&self) -> &tokio::runtime::Handle;\n    \n    /// Set the current working directory for the task\n    fn with_cwd(self, path: PathBuf) -> Self;\n    \n    /// Set a name for the task\n    fn with_name(self, name: String) -> Self;\n    \n    /// Get the task name if set (async version)\n    fn name_async(&self) -> Pin<Box<dyn Future<Output = Option<String>> + Send>>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTaskRecovery<T: Clone + Send + 'static, I: TaskId> {\n    /// Set a fallback value for recovery (async version)\n    fn with_fallback_async(self, value: T) -> Pin<Box<dyn Future<Output = Self> + Send>>;\n    \n    /// Set a fallback value for recovery (immediate version using Arc<Mutex>)\n    fn with_fallback(self, value: T) -> Self;\n    \n    /// Get the current retry count configuration\n    fn retry_count(&self) -> u8;\n    \n    /// Get the current retry attempt (async)\n    fn current_retry_async(&self) -> Pin<Box<dyn Future<Output = u8> + Send>>;\n    \n    /// Set a retry policy for this task\n    fn with_retry(self, count: u8) -> Self;\n    \n    /// Reset the retry counter (async)\n    fn reset_retry_counter_async(&self) -> Pin<Box<dyn Future<Output = ()> + Send>>;\n    \n    /// Check if the task has exhausted all retry attempts (async)\n    fn has_exhausted_retries_async(&self) -> Pin<Box<dyn Future<Output = bool> + Send>>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 561,
+      "end": 1507
+    },
+    "start": {
+      "line": 17,
+      "column": 0
+    },
+    "end": {
+      "line": 38,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/task/recoverable_task.rs",
+  "lines": "pub trait AsyncTaskRecovery<T: Clone + Send + 'static, I: TaskId> {\n    /// Set a fallback value for recovery (async version)\n    fn with_fallback_async(self, value: T) -> Pin<Box<dyn Future<Output = Self> + Send>>;\n    \n    /// Set a fallback value for recovery (immediate version using Arc<Mutex>)\n    fn with_fallback(self, value: T) -> Self;\n    \n    /// Get the current retry count configuration\n    fn retry_count(&self) -> u8;\n    \n    /// Get the current retry attempt (async)\n    fn current_retry_async(&self) -> Pin<Box<dyn Future<Output = u8> + Send>>;\n    \n    /// Set a retry policy for this task\n    fn with_retry(self, count: u8) -> Self;\n    \n    /// Reset the retry counter (async)\n    fn reset_retry_counter_async(&self) -> Pin<Box<dyn Future<Output = ()> + Send>>;\n    \n    /// Check if the task has exhausted all retry attempts (async)\n    fn has_exhausted_retries_async(&self) -> Pin<Box<dyn Future<Output = bool> + Send>>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+},
+{
+  "text": "pub trait AsyncTaskTiming<T: Clone + Send + 'static, I: TaskId> {\n    /// Get the total execution time of the task (async)\n    fn execution_time_async(&self) -> Pin<Box<dyn Future<Output = Duration> + Send>>;\n    \n    /// Get the time since task creation\n    fn time_since_creation(&self) -> Duration;\n    \n    /// Check if the task has timed out (async)\n    fn has_timed_out_async(&self) -> Pin<Box<dyn Future<Output = bool> + Send>>;\n    \n    /// Get the remaining time before timeout (async)\n    fn remaining_time_async(&self) -> Pin<Box<dyn Future<Output = Option<Duration>> + Send>>;\n}",
+  "range": {
+    "byteOffset": {
+      "start": 551,
+      "end": 1141
+    },
+    "start": {
+      "line": 18,
+      "column": 0
+    },
+    "end": {
+      "line": 30,
+      "column": 1
+    }
+  },
+  "file": "crates/tokio/src/task/timed_task.rs",
+  "lines": "pub trait AsyncTaskTiming<T: Clone + Send + 'static, I: TaskId> {\n    /// Get the total execution time of the task (async)\n    fn execution_time_async(&self) -> Pin<Box<dyn Future<Output = Duration> + Send>>;\n    \n    /// Get the time since task creation\n    fn time_since_creation(&self) -> Duration;\n    \n    /// Check if the task has timed out (async)\n    fn has_timed_out_async(&self) -> Pin<Box<dyn Future<Output = bool> + Send>>;\n    \n    /// Get the remaining time before timeout (async)\n    fn remaining_time_async(&self) -> Pin<Box<dyn Future<Output = Option<Duration>> + Send>>;\n}",
+  "charCount": {
+    "leading": 0,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "ruleId": "trait-bounds",
+  "severity": "hint",
+  "note": null,
+  "message": ""
+}
+]

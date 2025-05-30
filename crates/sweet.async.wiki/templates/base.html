@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="{{ config.default_language | default(value='en') }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+    <title>{% block title %}{{ page.title | default(value=config.title) }}{% endblock title %}</title>
+    <meta name="description" content="{{ page.description | default(value=config.description) }}">
+    
+    {# Include the social meta tags for this page #}
+    {% include "macros/social_meta.html" %}
+    {{ social_meta(page=page) }}
+    
+    {# CSS #}
+    <link rel="stylesheet" href="{{ get_url(path='css/styles.css', trailing_slash=false) | safe }}">
+    
+    {# Favicon #}
+    <link rel="icon" type="image/x-icon" href="{{ get_url(path='favicon.ico', trailing_slash=false) | safe }}">
+    
+    {% block extra_head %}{% endblock extra_head %}
+</head>
+<body>
+    {% block content %}{% endblock content %}
+    
+    {# JavaScript #}
+    <script src="{{ get_url(path='js/scripts.js', trailing_slash=false) | safe }}"></script>
+    {% block extra_js %}{% endblock extra_js %}
+</body>
+</html>

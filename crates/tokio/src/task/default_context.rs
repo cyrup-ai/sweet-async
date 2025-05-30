@@ -1,9 +1,9 @@
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use sweet_async_api::task::{AsyncTask, ContextualizedTask, TaskId, TaskRelationships};
-use sweet_async_api::orchestra::runtime::Runtime;
-use crate::UuidTaskId;
+use sweet_async_api::task::ContextualizedTask;
+use uuid::Uuid as UuidTaskId;
+use crate::task::relationships::TokioTaskRelationships;
 
 /// Default implementation of task context
 ///
@@ -68,35 +68,34 @@ impl Default for DefaultTaskContext {
 }
 
 /// Example task type that uses DefaultTaskContext
-pub struct TaskWithDefaultContext<T: Clone + Send + 'static> {
+pub struct TaskWithDefaultContext<T: Clone + Send + Sync + 'static> {
     context: DefaultTaskContext,
-    relationships: TaskRelationships<T, UuidTaskId>,
-    runtime: Option<Box<dyn Runtime<T, UuidTaskId, SpawnedTask = Box<dyn AsyncTask<T, UuidTaskId>>>>>,
+    relationships: TokioTaskRelationships<T, UuidTaskId>,
 }
 
-impl<T: Clone + Send + 'static> TaskWithDefaultContext<T> {
+impl<T: Clone + Send + Sync + 'static> TaskWithDefaultContext<T> {
     pub fn new() -> Self {
         Self {
             context: DefaultTaskContext::new(),
-            relationships: TaskRelationships::default(),
-            runtime: None,
+            relationships: TokioTaskRelationships::default(),
         }
     }
 }
 
-impl<T: Clone + Send + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
-    type RuntimeType = Box<dyn Runtime<T, UuidTaskId>>;
+impl<T: Clone + Send + Sync + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
+    type RuntimeType = crate::runtime::TokioRuntime;
+    type RelationshipsType = TokioTaskRelationships<T, UuidTaskId>;
     
-    fn relationships(&self) -> &TaskRelationships<T, UuidTaskId> {
+    fn relationships(&self) -> &Self::RelationshipsType {
         &self.relationships
     }
     
-    fn relationships_mut(&mut self) -> &mut TaskRelationships<T, UuidTaskId> {
+    fn relationships_mut(&mut self) -> &mut Self::RelationshipsType {
         &mut self.relationships
     }
     
     fn runtime(&self) -> &Self::RuntimeType {
-        self.runtime.as_ref().expect("Runtime not set")
+        panic!("Runtime should be accessed through orchestrator")
     }
     
     fn cwd(&self) -> PathBuf {

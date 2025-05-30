@@ -1,0 +1,87 @@
+{% extends "index.html" %}
+
+{% set images = ["hero.png", "1.png", "2.jpg", "3.gif", "4.jpg"] %}
+{# Use the page path to deterministically select an image #}
+{% set path = current_path | default(value="/") %}
+{% set hash = 0 %}
+{% for char in path %}
+  {% set hash = hash + char | length %}
+{% endfor %}
+{% set image_index = hash % (images | length) %}
+{% set selected_image = images[image_index] %}
+
+{% block extra_head %}
+{{ super() }}
+<style>
+.masthead {
+    background-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.7) 75%, #000 100%), 
+                      url("{{ get_url(path="assets/img/" ~ selected_image) }}") !important;
+}
+</style>
+{% endblock extra_head %}
+
+{% block nav_home_title %}sweet.async.wiki{% endblock nav_home_title %}
+{% block masthead_title %}Sugars for<br>Async Rust{% endblock masthead_title %}
+{% block masthead_description %}
+{% set code_snippet = "```rust
+let result = AsyncTask::to::<HFModel>({
+    hf_hub::download_model(\"mistral-7b\")
+}).await;
+```" %}
+<div class="mt-4">
+{{ code_snippet | markdown | safe }}
+</div>
+{% endblock masthead_description %}
+{% block masthead_button_label %}Read Docs{% endblock masthead_button_label %}
+{% block masthead_button_url %}/docs/getting-started/{% endblock masthead_button_url %}
+
+{% block about %}
+<!-- About -->
+<section class="about-section text-center" id="about">
+    <div class="container px-4 px-lg-5">
+        <div class="row gx-4 gx-lg-5 justify-content-center">
+            <div class="col-lg-8">
+                <h2 class="text-white mb-4">Get Started in 3 Lines</h2>
+                <pre class="text-left"><code class="language-rust">let result = AsyncTask::new()
+    .timeout(30.seconds())
+    .run(async { fetch_data().await })
+    .await?;</code></pre>
+                <p class="text-white-50 mt-4">
+                    Immutable, fluent builder for async work. Structured concurrency built in.
+                </p>
+                <div class="mt-5">
+                    <a href="/docs/getting-started/" class="btn btn-primary mx-2">Getting Started</a>
+                    <a href="/api/" class="btn btn-outline-light mx-2">API Reference</a>
+                    <a href="https://github.com/sweet-async/sweet-async" class="btn btn-outline-light mx-2">
+                        <i class="fab fa-github"></i> GitHub
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock about %}
+
+{% block projects %}{% endblock projects %}
+
+{% block contact_id %}contact{% endblock contact_id %}
+{% block contact %}
+<!-- Contact -->
+<section class="contact-section bg-black" id="contact">
+    <div class="container px-4 px-lg-5">
+        <div class="row gx-4 gx-lg-5 mb-4">
+            <div class="col-lg-8 mx-auto text-center">
+                <h2 class="text-white mb-4">Created by David Maple</h2>
+            </div>
+        </div>
+        {{ super() }}
+    </div>
+</section>
+{% endblock contact %}
+
+{% block signup_title %}Beta Software{% endblock signup_title %}
+{% block signup_icon %}fa-code{% endblock signup_icon %}
+{% block signup_form %}
+<p class="text-white">Core API is stable. Implementation in progress.</p>
+{% endblock signup_form %}
+

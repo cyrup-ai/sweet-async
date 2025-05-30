@@ -17,7 +17,7 @@ use sweet_async_api::orchestra::orchestrator::{OrchestratorError, TaskOrchestrat
 use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, TaskId, TaskStatus, StatusEnabledTask};
 
 use crate::runtime::TokioRuntime;
-use crate::task::async_task::{TaskMetrics, AsyncTask};
+use crate::task::tokio_task::{TaskMetrics, TokioTask};
 
 /// Basic, thread-safe orchestrator for Tokio tasks.
 pub struct TokioOrchestrator<T, I>
@@ -25,7 +25,7 @@ where
     T: Clone + Send + Sync + 'static,
     I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
 {
-    tasks: Arc<Mutex<HashMap<I, AsyncTask<T, I>>>>,
+    tasks: Arc<Mutex<HashMap<I, TokioTask<T, I>>>>,
     deps:  Arc<Mutex<HashMap<I, HashSet<I>>>>, // dependent -> deps
     groups: Arc<Mutex<HashMap<String, HashSet<I>>>>,
     pub(crate) runtime: TokioRuntime,
@@ -71,7 +71,7 @@ impl<T, I, Task> TaskOrchestrator<T, Task, I> for TokioOrchestrator<T, I>
 where
     T: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Eq + Hash + Send + 'static,
-    Task: ApiAsyncTask<T, I> + Into<AsyncTask<T, I>>,
+    Task: ApiAsyncTask<T, I> + Into<TokioTask<T, I>>,
 {
     type RegisterTaskReturn = I; // Just return the task ID
 
@@ -81,7 +81,7 @@ where
     type StartGroupFuture  = BoxFut<'static, Vec<(I, Result<T, AsyncTaskError>)>>;
 
     fn register_task(&self, task: Task) -> Self::RegisterTaskReturn {
-        let tokio_task: AsyncTask<T, I> = task.into();
+        let tokio_task: TokioTask<T, I> = task.into();
         let id = tokio_task.task_id();
         
         // Store the unawaited task
@@ -350,7 +350,7 @@ where
 // Manual clone because we hold a TokioRuntime (which is Clone) and Mutex fields
 impl<T, I> Clone for TokioOrchestrator<T, I>
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
     I: TaskId + Copy + Eq + Hash + Send + 'static,
 {
     fn clone(&self) -> Self {

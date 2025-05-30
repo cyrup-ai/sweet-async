@@ -5,6 +5,8 @@
 
 pub mod builder;
 pub mod result;
+pub mod spawning_task;
 
 pub use builder::TokioSpawningTaskBuilder;
 pub use result::{TokioAsyncResult, TokioTaskResult};
+pub use spawning_task::TokioSpawningTask;

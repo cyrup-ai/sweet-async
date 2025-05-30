@@ -23,14 +23,14 @@ use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority, Tas
 
 use super::async_work_wrapper::BoxedAsyncWork;
 use super::event::{TokioEventSender, create_event_channel};
-use crate::task::builder::TokioAsyncTaskBuilder;
+use crate::task::TokioAsyncTaskBuilder;
 
 /// Type alias for boxed async work that produces a channel receiver
 type BoxedChannelWork<T> = BoxedAsyncWork<tokio::sync::mpsc::Receiver<T>>;
 
 /// Channel-based emitting task builder
 #[derive(Clone)]
-pub struct ChannelEmittingTaskBuilder<
+pub struct TokioEmittingTaskBuilder<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
@@ -55,7 +55,7 @@ impl<
     EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
-> ChannelEmittingTaskBuilder<T, C, EItem, EOverall, I>
+> TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
     /// Create a new emitting task builder
     pub fn new(runtime: Handle, active_tasks: Arc<AtomicUsize>) -> Self {
@@ -88,7 +88,7 @@ impl<
     EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
-> AsyncTaskBuilder for ChannelEmittingTaskBuilder<T, C, EItem, EOverall, I>
+> AsyncTaskBuilder for TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
     fn timeout(self, duration: Duration) -> Self {
         Self {
@@ -126,7 +126,7 @@ pub struct ChannelSenderBuilder<
     EOverall: Send + 'static,
     I: TaskId,
 > {
-    parent: ChannelEmittingTaskBuilder<T, C, EItem, EOverall, I>,
+    parent: TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>,
     sender_work: Option<BoxedChannelWork<T>>,
     sender_strategy: SenderStrategy,
 }
@@ -139,7 +139,7 @@ pub struct ChannelReceiverBuilder<
     EOverall: Send + 'static,
     I: TaskId,
 > {
-    parent: ChannelEmittingTaskBuilder<T, C, EItem, EOverall, I>,
+    parent: TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>,
     sender_work: BoxedChannelWork<T>,
     sender_strategy: SenderStrategy,
     receiver_work: Option<BoxedAsyncWork<C>>,
@@ -152,7 +152,7 @@ impl<
     EItem: Send + Sync + 'static,
     EOverall: Send + Sync + 'static,
     I: TaskId,
-> ApiEmittingTaskBuilder<T, C, EItem, I> for ChannelEmittingTaskBuilder<T, C, EItem, EOverall, I>
+> ApiEmittingTaskBuilder<T, C, EItem, I> for TokioEmittingTaskBuilder<T, C, EItem, EOverall, I>
 {
     type SenderBuilder = ChannelSenderBuilder<T, C, EItem, EOverall, I>;
 
@@ -174,7 +174,7 @@ impl<
 }
 
 /// Channel-based emitting task implementation
-pub struct ChannelEmittingTask<
+pub struct TokioEmittingTask<
     T: Clone + Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
@@ -194,7 +194,7 @@ pub struct ChannelEmittingTask<
     /// Cancellation token
     cancel_token: CancellationToken,
     /// Task metrics
-    metrics: crate::task::async_task::TaskMetrics,
+    metrics: crate::task::tokio_task::TaskMetrics,
     /// Task timeout
     task_timeout: Duration,
     /// Running flag
@@ -208,7 +208,7 @@ impl<
     C: Clone + Send + Sync + 'static,
     EItem: Send + Sync + 'static,
     I: TaskId,
-> ChannelEmittingTask<T, C, EItem, AsyncTaskError, I>
+> TokioEmittingTask<T, C, EItem, AsyncTaskError, I>
 {
     /// Create a new channel-based emitting task
     pub fn new(
@@ -386,7 +386,7 @@ impl<
             event_tx,
             result_rx,
             cancel_token,
-            metrics: crate::task::async_task::TaskMetrics::new(),
+            metrics: crate::task::tokio_task::TaskMetrics::new(),
             task_timeout: task_timeout_duration,
             is_running: AtomicBool::new(true),
             _marker: PhantomData,
@@ -401,7 +401,7 @@ impl<
     EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
-> EmittingTask<T, C, EItem, EOverall, I> for ChannelEmittingTask<T, C, EItem, EOverall, I>
+> TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     fn task_id(&self) -> I {
         self.id
@@ -440,5 +440,27 @@ impl<
                 Err(unsafe { std::mem::transmute_copy(&AsyncTaskError::Timeout(self.task_timeout)) })
             }
         }
+    }
+}
+
+// Implement EmittingTask trait
+impl<
+    T: Clone + Send + Sync + 'static,
+    C: Clone + Send + Sync + 'static,
+    EItem: Send + Sync + 'static,
+    EOverall: Send + 'static,
+    I: TaskId,
+> EmittingTask<T, C, EItem, EOverall, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
+{
+    type Final = super::TokioFinalEvent<(), C, EItem, I>;
+
+    fn is_complete(&self) -> bool {
+        !self.is_running.load(Ordering::Relaxed)
+    }
+
+    fn cancel(&self) -> Result<(), sweet_async_api::orchestra::OrchestratorError> {
+        self.cancel_token.cancel();
+        self.is_running.store(false, Ordering::SeqCst);
+        Ok(())
     }
 }

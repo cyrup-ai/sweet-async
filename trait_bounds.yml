@@ -1,0 +1,5 @@
+id: trait-bounds
+language: rust
+rule:
+  kind: type_bound_list
+  pattern: $BOUND
