@@ -2,7 +2,6 @@ use crate::task::TaskId;
 use crate::task::builder::AsyncTaskBuilder;
 use crate::task::builder::AsyncWork;
 use crate::task::spawn::SpawningTask;
-use crate::task::TaskRelationships;
 
 use crate::task::spawn::into_async_result::IntoAsyncResult;
 use std::future::Future;

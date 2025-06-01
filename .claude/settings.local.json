@@ -37,7 +37,8 @@
       "WebFetch(domain:ast-grep.github.io)",
       "Bash(diff:*)",
       "Bash(jq:*)",
-      "Bash(comm:*)"
+      "Bash(comm:*)",
+      "Bash(cargo doc:*)"
     ],
     "deny": []
   },

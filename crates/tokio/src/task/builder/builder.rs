@@ -133,7 +133,7 @@ where
         retry_count: u8,
         tracing_enabled: bool,
         name: Option<String>,
-        parent: Option<TokioOrchestrator<T, I>>,
+        parent: Option<Box<dyn std::any::Any + Send + Sync>>,
         _marker: PhantomData<(T, Task, I)>,
     },
     Emitting {
@@ -491,11 +491,12 @@ where
 }
 
 // Add SpawningTaskBuilder implementation so we can call run() method
-impl<T, I> sweet_async_api::task::spawn::SpawningTaskBuilder<T, AsyncTaskError, I>
-    for DefaultOrchestratorBuilder<T, crate::task::tokio_task::TokioAsyncTask<T, I>, I>
+impl<T, I, F> sweet_async_api::task::spawn::SpawningTaskBuilder<T, AsyncTaskError, I>
+    for DefaultOrchestratorBuilder<T, crate::task::tokio_task::TokioTask<T, I, F>, I>
 where
     T: Clone + Send + Sync + 'static,
-    I: TaskId,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+    F: AsyncWork<Result<T, AsyncTaskError>> + Send + Sync + 'static + Clone,
 {
     type Task = crate::task::spawn::spawning_task::TokioSpawningTask<T, I>;
     type ParentType = crate::orchestra::TokioOrchestrator<T, I>;
@@ -512,6 +513,7 @@ where
                 tracing_enabled,
                 name,
                 _marker,
+                ..
             } => Self::Spawning {
                 runtime,
                 active_tasks,
@@ -520,8 +522,8 @@ where
                 retry_count,
                 tracing_enabled,
                 name,
+                parent: Some(Box::new(parent) as Box<dyn std::any::Any + Send + Sync>),
                 _marker,
-                // TODO: Store the parent orchestrator reference
             },
             Self::Emitting { .. } => panic!("Cannot set parent on emitting task builder"),
         }
@@ -547,9 +549,17 @@ where
                 ..
             } => {
                 // Create default orchestrator automatically if none provided
-                let _orchestrator = parent.unwrap_or_else(|| {
+                // We'll need the actual type with bounds when using it
+                let _orchestrator: TokioOrchestrator<T, I> = if let Some(boxed_parent) = parent {
+                    // Try to downcast the parent
+                    if let Ok(parent) = boxed_parent.downcast::<TokioOrchestrator<T, I>>() {
+                        *parent
+                    } else {
+                        TokioOrchestrator::new(crate::runtime::TokioRuntime::new())
+                    }
+                } else {
                     TokioOrchestrator::new(crate::runtime::TokioRuntime::new())
-                });
+                };
                 
                 // Use the actual TokioSpawningTaskBuilder with automatic orchestrator
                 let mut builder = crate::task::spawn::builder::TokioSpawningTaskBuilder::new(runtime, active_tasks);
@@ -599,25 +609,20 @@ where
             + 'static,
         H: sweet_async_api::task::builder::AsyncWork<Out> + Send + 'static,
     {
-        match self {
-            Self::Spawning {
-                runtime,
-                active_tasks,
-                ..
-            } => {
-                // Create a future that executes the work and applies the handler
-                Box::pin(async move {
+        // Use a single async block to ensure consistent types
+        async move {
+            match self {
+                Self::Spawning { .. } => {
+                    // Execute the work first
                     let result = work.run().await;
-                    let async_result = result.into_async_result().await;
-                    // The handler is AsyncWork, so we need to run it
+                    let _async_result = result.into_async_result().await;
+                    // Then run the handler
                     handler.run().await
-                })
-            }
-            Self::Emitting { .. } => {
-                Box::pin(async move {
-                    // Since we can't execute the work, just run the handler directly
-                    handler.run().await
-                })
+                }
+                Self::Emitting { .. } => {
+                    // For emitting tasks, we can't use this method
+                    panic!("Cannot call await_result_with_handler on an emitting task builder")
+                }
             }
         }
     }

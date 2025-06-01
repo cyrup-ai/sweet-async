@@ -2,8 +2,10 @@ pub mod builder;
 pub mod cancellable_task;
 pub mod default_context;
 pub mod emit;
+pub mod message_builder;
 pub mod recoverable_task;
 pub mod spawn;
+pub mod task_communication;
 pub mod task_context;
 pub mod task_error;
 pub mod task_id;
@@ -31,8 +33,10 @@ pub use cancellable_task::*;
 pub use cpu_usage::*;
 pub use io_usage::*;
 pub use memory_usage::*;
+pub use message_builder::*;
 pub use named_task::*;
 pub use recoverable_task::*;
+pub use task_communication::*;
 pub use task_context::*;
 pub use task_error::*;
 pub use task_id::*;
@@ -42,3 +46,6 @@ pub use task_relationships::*;
 pub use task_status::*;
 pub use timed_task::*;
 pub use tracing_task::*;
+
+// Emit module re-exports
+pub use emit::*;

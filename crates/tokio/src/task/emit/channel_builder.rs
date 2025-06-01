@@ -450,7 +450,7 @@ impl<
     EItem: Send + Sync + 'static,
     EOverall: Send + 'static,
     I: TaskId,
-> EmittingTask<T, C, EItem, EOverall, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
+> EmittingTask<T, C, EOverall, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
 {
     type Final = super::TokioFinalEvent<(), C, EItem, I>;
 

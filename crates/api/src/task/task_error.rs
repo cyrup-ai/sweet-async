@@ -2,7 +2,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// Standard error type for task operations
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum AsyncTaskError {
     #[error("Task timed out after {0:?}")]
     Timeout(Duration),

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::hash::Hash;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};

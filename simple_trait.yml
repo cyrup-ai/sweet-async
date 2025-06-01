@@ -1,4 +1,0 @@
-id: simple-trait
-language: rust
-rule:
-  pattern: "pub trait $NAME"

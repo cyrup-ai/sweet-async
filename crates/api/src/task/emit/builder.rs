@@ -11,11 +11,31 @@ pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: S
     fn sender<F>(self, sender: F, strategy: SenderStrategy) -> Self::SenderBuilder
     where
         F: crate::task::builder::AsyncWork<T> + Send + 'static;
+        
+    /// Sets the sender for sequential execution (order-dependent workflows)
+    fn sequence<F>(self, sender: F) -> Self::SenderBuilder
+    where
+        F: crate::task::builder::AsyncWork<T> + Send + 'static;
 }
 
 #[allow(dead_code)]
 pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;
+    
+    /// Add dependency via closure for zero-allocation access in sender scope
+    fn with_dependency<D, F>(self, dependency_fn: F) -> Self
+    where
+        D: Send + 'static,
+        F: FnOnce() -> D + Send + 'static;
+    
+    /// Add dependency for zero-allocation access in sender scope
+    fn with<D>(self, dependency: D) -> Self
+    where
+        D: Clone + Send + 'static;
+    
+    /// Configure batch size for automatic chunking
+    fn with_batch_size(self, batch_size: usize) -> Self;
+        
     /// Sets the receiver for the sender builder.
     fn receiver<F>(self, receiver: F, strategy: ReceiverStrategy) -> Self::ReceiverBuilder
     where
