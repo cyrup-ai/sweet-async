@@ -6,7 +6,6 @@ authors = ["David Maple <david@cyrup.ai>"]
 description = "Tokio implementation for the Sweet Async library"
 license = "MIT"
 repository = "https://github.com/cyrup-ai/sweet_async.git"
-workspace = "../../"
 documentation = "https://docs.rs/sweet_async_tokio"
 readme = "README.md"
 keywords = ["async", "task", "tokio", "future", "concurrency"]
@@ -21,29 +20,30 @@ rustdoc-args = ["--cfg", "docsrs"]
 rustc-args = ["--document-private-items"]
 
 [dependencies]
-sweet_async_api = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
-tokio-stream = { workspace = true }
-futures-core = { workspace = true }
-futures-util = { workspace = true }
-futures = { workspace = true }
-lazy_static = { workspace = true }
-thiserror = { workspace = true, features = ["std"] }
-tracing = { workspace = true }
-num_cpus = { workspace = true }
-rayon = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
-rand = { workspace = true }
-tokio-util = { workspace = true }
-hostname = { workspace = true }
-bincode = { workspace = true }
-# Encryption dependencies (optional)
-cryypt = { workspace = true, optional = true }
+sweet_async_api = { path  = "../api"}
+tokio = { version = "1.45.1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-stream = "0.1"
+futures-core = "0.3"
+futures-util = "0.3"
+futures = "0.3"
+lazy_static = "1.5.0"
+thiserror = { version = "2.0.12" }
+tracing = "0.1"
+num_cpus = "1.17.0"
+rayon = "1.10.0"
+uuid = { version = "1.17.0", features = ["v4"] }
+rand = "0.9.1"
+tokio-util = "0.7"
+hostname = "0.4.1"
+bincode = "2.0.1"
+cryypt-cipher = { optional = true, path = "../../../../cryypt/cipher"}
+cryypt-key = { optional = true, path = "../../../../cryypt/cipher"}
+cryypt-quiq = { optional = true, path = "../../../cryypt/quiq"}
 
 [features]
 default = []
 # Enable encryption support for task communication
-encryption = ["cryypt"]
+encryption = ["cryypt-cipher", "cryypt-key", "cryypt-quiq"]
 # Enable metrics collection
 metrics = []
 # Enable distributed task support with vector clocks
@@ -52,8 +52,8 @@ distributed = []
 zk = []
 
 [dev-dependencies]
-tokio-test = { workspace = true }
-cargo-nextest = { workspace = true }
+tokio-test = "0.4"
+cargo-nextest = "0.9"
 
 [lib]
 name = "sweet_async_tokio"

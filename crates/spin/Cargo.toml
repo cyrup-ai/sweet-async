@@ -1,8 +1,0 @@
-[package]
-name = "sweet_async_spin"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-spin-sdk.workspace = true
-sweet_async_api = { workspace = true }

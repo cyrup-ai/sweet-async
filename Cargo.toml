@@ -1,74 +1,55 @@
 [workspace]
 members = [
-    "crates/api",
-    "crates/tokio",
-    "crates/sweet_async",
-    "crates/aws",
-    "crates/vercel",
-    "crates/shuttle",
-    "crates/spin"
+    "api",
+    "sweet_async",
+    "tokio",
+    "sweet-async-workspace-hack",
+    "aws",
+    "shuttle",
+    "spin",
+    "telemetry",
+    "vercel",
+    "zkp",
 ]
-resolver = "3"
-[workspace.metadata]
-authors = ["David Maple <david@cyrup.ai>"]
-description = "Async sugar to avoid async_trait and async fn, with a focus on ease of use and ergonomics"
-license = "MIT"
-repository = "https://github.com/cyrup-ai/sweet_async"
 
+# Use the new resolver to handle features better
+resolver = "2"
+
+# Dependencies shared across workspace members
 [workspace.dependencies]
-tokio = { version = "1.45.1" }
-tokio-stream = { version = "0.1.17" }
-futures-core = { version = "0.3.31" }
-futures-util = { version = "0.3.31" }
-lazy_static = { version = "1.5.0" }
-thiserror = { version = "2.0.12", features = ["std"] }
-tracing = { version = "0.1.41" }
-futures = { version = "0.3.31" }
-tokio-test = { version = "0.4.4" }
-cargo-nextest = { version = "0.9.97-b.2" }
-uuid = "1.17.0"
-chrono = "0.4.41"
-num_cpus = "1.16.0"
-rayon = "1.10.0"
-rand = "0.9"
-crossterm = { version = "0.29" }
-ratatui = { version = "0.30.0-alpha.4", features = ["serde"], default-features = false }
-clap = { version = "4.5", features = ["derive"] }
-tokio-util = { version = "0.7.15", features = ["full"] }
-hostname = { version = "0.4" }
-bincode = { version = "2.0" }
+# Core async
+futures = "0.3"
+futures-core = "0.3"
+futures-util = "0.3"
+tokio = { version = "1.45.1", features = ["full"] }
 
-# AWS SDK dependencies
-aws-config = "1.6.3"
-aws-sdk-lambda = "1.82.0"
-aws-sdk-ec2 = "1.135.0"
-aws-sdk-autoscaling = "1.79.0"
+# Error handling
+thiserror = { version = "2.0", features = ["std"] }
 
-# Shuttle dependencies
-shuttle-runtime = "0.55.0"
-shuttle-service = "0.55.0"
+# Utilities
+uuid = "1.17"
+chrono = "0.4"
+lazy_static = "1.5"
+tracing = "0.1"
+num_cpus = "1.17"
+hostname = "0.4"
 
-# Spin dependencies
-spin-sdk = "3.1.1"
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
 
-# Vercel dependencies
-reqwest = { version = "0.12.18", features = ["json"] }
-serde_json = "1.0.140"
-
-# Encryption dependencies
-serde = { version = "1.0.219", features = ["derive"] }
+# Server frameworks
+axum = { version = "0.8" }
 pingora = { version = "0.5.0" }
-axum = { version = "0.8.4" }
-quiche = { version = "0.24.2" }
 
+# CLI/TUI
+clap = { version = "4.5.39", features = ["derive"] }
+crossterm = { version = "0.29" }
+ratatui = { version = "0.30.0-alpha.4", features = ["serde"] }
 
-sweet_async_aws = { path = "crates/aws" }
-sweet_async_vercel = { path = "crates/vercel" }
-sweet_async_shuttle = { path = "crates/shuttle" }
-sweet_async_spin = { path = "crates/spin" }
-sweet_async = { path = "crates/sweet_async" }
-sweet_async_api = { path = "crates/api" }
-sweet_async_tokio = { path = "crates/tokio" }
+# Development
+cargo-nextest = "0.9"
 
-percent-encoding = "2.3.1"
-cryypt = { git = "https://github.com/cyrup-ai/cryypt" }
+# External CYRUP dependencies - paths will be unified through workspace-hack
+cryypt_quiq = { path = "../../../cryypt/quiq" }
+cryypt_cipher = { path = "../../../cryypt/cipher" }
+cryypt_key = { path = "../../../cryypt/key" }

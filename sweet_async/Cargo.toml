@@ -1,0 +1,32 @@
+[package]
+name = "sweet_async"
+version = "0.1.0"
+edition = "2024"
+# publish = true
+
+
+[dependencies]
+sweet_async_api = { path = "../api" }
+tokio = { version = "1.45.1", optional = true }
+clap = { version = "4.5.39", features = ["derive"] }
+crossterm = { version = "0.29" }
+ratatui = { version = "0.30.0-alpha.4", features = [ "serde" ] }
+cryypt_quiq = { optional = true, path = "../../../cryypt/quiq"}
+cryypt_cipher = { optional = true, path = "../../../cryypt/cipher"}
+cryypt_key = { optional = true, path = "../../../cryypt/key"}
+
+# Features
+[features]
+tokio = ["dep:sweet_async_tokio", "dep:tokio"]
+default = ["tokio"]
+cryypt = ["dep:sweet_async_std"] # For future
+
+# executable cli
+[[bin]]
+name = "async"
+path = "src/main.rs"
+
+# library
+[lib]
+name = "sweet_async"
+path = "src/lib.rs"

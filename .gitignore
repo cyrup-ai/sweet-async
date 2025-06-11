@@ -2,12 +2,12 @@
 # Compiled Files
 # ==============================
 *.lock
-*.[oa]  
+*.[oa]
 *.d
-*.rlib  
-*.rmeta  
-**/*.rmeta  
-.history/  
+*.rlib
+*.rmeta
+**/*.rmeta
+.history/
 *.so
 *.dylib
 *.dll
@@ -52,7 +52,9 @@ eggs/
 .eggs/
 lib/
 lib64/
-parts/
+.claude/
+.cursorrules/
+.surreal/
 sdist/
 var/
 *.egg-info/
@@ -108,6 +110,10 @@ ipython_config.py
 .vscode/
 .idea/
 *.sw[po]
+.crates-lsp/
+.windsurf/
+.goose/
+.cursorrules/
 
 # ==============================
 # OS Generated Files

@@ -1,0 +1,91 @@
+{% macro social_meta(page) %}
+  {% set base_url = config.base_url | default(value="") %}
+  {% set page_slug = page.slug | default(value="index") %}
+  {% set social_base = base_url ~ "/social/" ~ page_slug %}
+  
+  {# Primary Open Graph tags #}
+  <meta property="og:title" content="{{ page.title | default(value=config.title) }}">
+  <meta property="og:description" content="{{ page.description | default(value=config.description) }}">
+  <meta property="og:url" content="{{ page.permalink | default(value=base_url) }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.title }}">
+  
+  {# Open Graph Images - using @2x as default #}
+  <meta property="og:image" content="{{ social_base }}/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:alt" content="{{ page.title | default(value=config.title) }}">
+  
+  {# Additional image sizes for different contexts #}
+  <meta property="og:image" content="{{ social_base }}/og-square.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="1200">
+  
+  {# Twitter Card tags #}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@kloudsamurai">
+  <meta name="twitter:creator" content="@kloudsamurai">
+  <meta name="twitter:title" content="{{ page.title | default(value=config.title) }}">
+  <meta name="twitter:description" content="{{ page.description | default(value=config.description) }}">
+  <meta name="twitter:image" content="{{ social_base }}/twitter.jpg">
+  <meta name="twitter:image:alt" content="{{ page.title | default(value=config.title) }}">
+  
+  {# LinkedIn specific #}
+  <meta property="og:image" content="{{ social_base }}/linkedin.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="627">
+  
+  {# WhatsApp #}
+  <meta property="og:image" content="{{ social_base }}/whatsapp.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  
+  {# Pinterest Rich Pins #}
+  <meta property="og:image" content="{{ social_base }}/pinterest.jpg">
+  <meta property="og:image:width" content="1000">
+  <meta property="og:image:height" content="1500">
+  <meta name="pinterest:media" content="{{ social_base }}/pinterest.jpg">
+  <meta name="pinterest:description" content="{{ page.description | default(value=config.description) }}">
+  
+  {# Discord #}
+  <meta property="og:image" content="{{ social_base }}/discord.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  
+  {# Mobile optimized images #}
+  <link rel="image_src" href="{{ social_base }}/mobile.jpg">
+  
+  {# Responsive images for different devices #}
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" sizes="1200x1200" href="{{ social_base }}/og-square.jpg">
+  
+  {# Preload critical social images #}
+  <link rel="preload" as="image" href="{{ social_base }}/og.jpg">
+  
+  {# Schema.org structured data #}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "{{ page.title | default(value=config.title) }}",
+    "description": "{{ page.description | default(value=config.description) }}",
+    "url": "{{ page.permalink | default(value=base_url) }}",
+    "image": {
+      "@type": "ImageObject",
+      "url": "{{ social_base }}/og.jpg",
+      "width": 2400,
+      "height": 1260
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "{{ config.title }}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{{ base_url }}/logo.png"
+      }
+    }
+  }
+  </script>
+{% endmacro %}

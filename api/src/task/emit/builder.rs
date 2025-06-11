@@ -22,12 +22,6 @@ pub trait EmittingTaskBuilder<T: Clone + Send + 'static, C: Send + 'static, E: S
 pub trait SenderBuilder<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     type ReceiverBuilder: ReceiverBuilder<T, C, E, I>;
     
-    /// Add dependency via closure for zero-allocation access in sender scope
-    fn with_dependency<D, F>(self, dependency_fn: F) -> Self
-    where
-        D: Send + 'static,
-        F: FnOnce() -> D + Send + 'static;
-    
     /// Add dependency for zero-allocation access in sender scope
     fn with<D>(self, dependency: D) -> Self
     where
