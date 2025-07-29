@@ -22,12 +22,12 @@ macro_rules! __sweet_flag {
 
 // ── Task-builder level sugar ────────────────────────────────────────────────
 __sweet_flag!(WithAutoScaling,  with_auto_scaling, bool);
-__sweet_flag!(LambdaExec,       lambda,            fn(_, _));
-__sweet_flag!(FallbackVercel,   fallback_to_vercel, fn(_, _));
-__sweet_flag!(FallbackLocal,    fallback_to_local,  fn(_, _));
+__sweet_flag!(LambdaExec,       lambda);
+__sweet_flag!(FallbackVercel,   fallback_to_vercel);
+__sweet_flag!(FallbackLocal,    fallback_to_local);
 __sweet_flag!(VectorClocked,    with_vector_clock,  Vec<()>);
 __sweet_flag!(CircuitBroken,    with_circuit_breaker, ());
-__sweet_flag!(HurlDsl,          hurl,              fn(_)->());
+__sweet_flag!(HurlDsl,          hurl);
 
 // await_result must remain `async`; we expose a stub that just returns self.
 pub trait AwaitResult: Sized {

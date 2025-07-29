@@ -27,7 +27,7 @@ pub struct TokioEventCollector<T, C, EItemProc, I: TaskId>
 where
     T: Send + 'static,
     C: Clone + Send + Sync + 'static,
-    EItemProc: Send + 'static, // Error from receiver_fn
+    EItemProc: Send + Sync + Clone + 'static, // Error from receiver_fn
     I: TaskId,
 {
     /// The aggregated results, now a HashMap keyed by event Uuid
@@ -455,7 +455,7 @@ impl<T, C, EItemProc, I: TaskId> Default for TokioEventCollector<T, C, EItemProc
 where
     T: Send + 'static,
     C: Clone + Send + Sync + 'static,
-    EItemProc: Send + 'static,
+    EItemProc: Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
         Self::new()

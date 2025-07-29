@@ -336,4 +336,26 @@ impl<T: Clone + Send + Sync + 'static, I: TaskId> AsyncTask<T, I> for TokioSpawn
     -> impl sweet_async_api::orchestra::OrchestratorBuilder<R, Task, I> {
         crate::task::builder::DefaultOrchestratorBuilder::<R, Task, I>::new_emitting()
     }
+
+    async fn spawn<F, R>(&self, work: F) -> Result<R, AsyncTaskError>
+    where
+        F: AsyncWork<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        // Execute the work on the Tokio runtime
+        let result = work.run().await;
+        Ok(result)
+    }
+
+    async fn spawn_with_timeout<F, R>(&self, work: F, timeout: std::time::Duration) -> Result<R, AsyncTaskError>
+    where
+        F: AsyncWork<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        // Execute the work on the Tokio runtime with a timeout
+        match tokio::time::timeout(timeout, work.run()).await {
+            Ok(result) => Ok(result),
+            Err(_) => Err(AsyncTaskError::Timeout(timeout)),
+        }
+    }
 }

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use futures::channel::mpsc;
 use crate::task::{TaskId, TaskStatus, AsyncTaskError};
 
-use cryypt::Cipher;
+#[cfg(feature = "cryypt")]
+use cryypt_cipher::Cipher;
 
 /// Envelope containing a message with full context
 #[derive(Clone, Debug)]
@@ -61,7 +62,8 @@ pub struct ChannelConfig {
     /// Whether to use unbounded channels
     pub unbounded: bool,
     /// Cipher for encryption (if encryption is enabled)
-    pub cipher: Option<Arc<Cipher>>,
+    #[cfg(feature = "cryypt")]
+    pub cipher: Option<std::sync::Arc<Cipher>>,
 }
 
 impl Default for ChannelConfig {
@@ -69,6 +71,7 @@ impl Default for ChannelConfig {
         Self {
             buffer_size: 100,
             unbounded: false,
+            #[cfg(feature = "cryypt")]
             cipher: None,
         }
     }
@@ -94,7 +97,8 @@ pub struct TaskSender<T: Clone + Send + 'static, I: TaskId> {
     /// The target task's debug name
     pub target_name: Option<String>,
     /// Cipher for secure communication
-    pub cipher: Option<Arc<Cipher>>,
+    #[cfg(feature = "cryypt")]
+    pub cipher: Option<std::sync::Arc<Cipher>>,
 }
 
 

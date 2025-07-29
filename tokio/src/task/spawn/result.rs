@@ -90,26 +90,25 @@ impl<T: Send + 'static> TaskResult<T> for TokioAsyncResult<T> {
 }
 
 impl<T: Send + 'static> AsyncResult<T> for TokioAsyncResult<T> {
-    type AndThenFuture<U> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
-    type AndThenResult<U> = TokioTaskResult<U>;
+    type AndThenFuture<U: Send + 'static> = Pin<Box<dyn Future<Output = Self::AndThenResult<U>> + Send + 'static>>;
+    type AndThenResult<U: Send + 'static> = TokioTaskResult<U>;
     type OrElseFuture = Pin<Box<dyn Future<Output = Self> + Send + 'static>>;
-    type MapResult<U> = TokioAsyncResult<U>;
+    type MapResult<U: Send + 'static> = TokioAsyncResult<U>;
     type MapErrResult = TokioAsyncResult<T>;
 
     fn and_then<U, F, Fut>(self, f: F) -> Self::AndThenFuture<U>
     where
         F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = Self::AndThenResult<U>> + Send + 'static,
-        U: Send + 'static,
+        U: Send + 'static + 'static,
     {
         Box::pin(async move {
             match self.result {
-                Ok(_) => {
-                    // TODO: implement async work execution
-                    TokioTaskResult::new(Err(AsyncTaskError::Failure(
-                        "and_then not yet implemented".to_string(),
-                    )))
-                }
+                Ok(value) => {
+                    // Execute the provided async work on the successful result
+                    let future = f.run();
+                    future.await
+                },
                 Err(err) => TokioTaskResult::new(Err(err)),
             }
         })
@@ -124,10 +123,9 @@ impl<T: Send + 'static> AsyncResult<T> for TokioAsyncResult<T> {
             match self.result {
                 Ok(value) => TokioAsyncResult::new(Ok(value)),
                 Err(_) => {
-                    // TODO: implement async work execution
-                    TokioAsyncResult::new(Err(AsyncTaskError::Failure(
-                        "or_else not yet implemented".to_string(),
-                    )))
+                    // Execute the provided async work on error
+                    let future = f.run();
+                    future.await
                 }
             }
         })
@@ -138,18 +136,19 @@ impl<T: Send + 'static> AsyncResult<T> for TokioAsyncResult<T> {
         F: AsyncWork<U> + Send + 'static,
         U: Send + 'static,
     {
-        // TODO: implement async work execution
-        TokioAsyncResult::new(Err(AsyncTaskError::Failure(
-            "map not yet implemented".to_string(),
-        )))
+        // Execute the provided async work to map the result
+        TokioAsyncResult::new(Ok(f.run().await))
     }
 
     fn map_err<F>(self, f: F) -> Self::MapErrResult
     where
         F: AsyncWork<AsyncTaskError> + Send + 'static,
     {
-        // TODO: implement async work execution
-        TokioAsyncResult::new(self.result)
+        // Execute the provided async work to map the error
+        match self.result {
+            Ok(value) => TokioAsyncResult::new(Ok(value)),
+            Err(_) => TokioAsyncResult::new(Err(f.run().await)),
+        }
     }
 
     fn unwrap(self) -> T {

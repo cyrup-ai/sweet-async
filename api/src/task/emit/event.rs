@@ -78,6 +78,11 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
     // Database sources
     fn from_database<P>(&mut self, pool: P, query: &str) -> &mut Self
     where
+        P: Send + 'static;
+    
+    #[cfg(feature = "sqlx")]
+    fn from_postgres<P>(&mut self, pool: P, query: &str) -> &mut Self
+    where
         P: sqlx::PgPool + Send + 'static;
     
     fn from_surrealdb<DB>(&mut self, db: DB, query: &str) -> &mut Self
@@ -111,17 +116,17 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
         Q: Send + 'static;
     
     // Cloud Storage
-    fn from_s3<C>(&mut self, client: C, bucket: &str, pattern: &str) -> &mut Self
+    fn from_s3<Client>(&mut self, client: Client, bucket: &str, pattern: &str) -> &mut Self
     where
-        C: Send + 'static;
+        Client: Send + 'static;
     
-    fn from_gcs<C>(&mut self, client: C, bucket: &str, pattern: &str) -> &mut Self
+    fn from_gcs<Client>(&mut self, client: Client, bucket: &str, pattern: &str) -> &mut Self
     where
-        C: Send + 'static;
+        Client: Send + 'static;
     
-    fn from_azure_blob<C>(&mut self, client: C, container: &str, pattern: &str) -> &mut Self
+    fn from_azure_blob<Client>(&mut self, client: Client, container: &str, pattern: &str) -> &mut Self
     where
-        C: Send + 'static;
+        Client: Send + 'static;
     
     // Version Control
     fn from_github(&mut self, repo: &str, pattern: &str) -> &mut Self;
@@ -131,9 +136,9 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
     fn from_git_repo(&mut self, url: &str) -> &mut Self;
     
     // Message Queues & Streaming
-    fn from_kafka_topic<C>(&mut self, consumer: C, topic: &str) -> &mut Self
+    fn from_kafka_topic<Consumer>(&mut self, consumer: Consumer, topic: &str) -> &mut Self
     where
-        C: Send + 'static;
+        Consumer: Send + 'static;
     
     fn from_redis_stream<R>(&mut self, conn: R, pattern: &str) -> &mut Self
     where
@@ -150,9 +155,9 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
     // Social Media & Communication
     fn from_twitter_stream(&mut self, account: &str) -> &mut Self;
     
-    fn from_discord_server<T>(&mut self, token: T, server_id: &str) -> &mut Self
+    fn from_discord_server<Token>(&mut self, token: Token, server_id: &str) -> &mut Self
     where
-        T: Send + 'static;
+        Token: Send + 'static;
     
     fn from_tiktok_feed<A>(&mut self, api: A) -> &mut Self
     where
@@ -178,9 +183,9 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
     where
         A: Send + 'static;
     
-    fn from_tesla_api<T>(&mut self, token: T) -> &mut Self
+    fn from_tesla_api<Token>(&mut self, token: Token) -> &mut Self
     where
-        T: Send + 'static;
+        Token: Send + 'static;
     
     // Financial & Shopping
     fn from_bank_transactions<A>(&mut self, api: A) -> &mut Self

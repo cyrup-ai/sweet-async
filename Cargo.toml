@@ -1,15 +1,8 @@
 [workspace]
 members = [
-    "api",
+    "api", "crossbeam",
     "sweet_async",
     "tokio",
-    "sweet-async-workspace-hack",
-    "aws",
-    "shuttle",
-    "spin",
-    "telemetry",
-    "vercel",
-    "zkp",
 ]
 
 # Use the new resolver to handle features better
@@ -50,6 +43,6 @@ ratatui = { version = "0.30.0-alpha.4", features = ["serde"] }
 cargo-nextest = "0.9"
 
 # External CYRUP dependencies - paths will be unified through workspace-hack
-cryypt_quiq = { path = "../../../cryypt/quiq" }
-cryypt_cipher = { path = "../../../cryypt/cipher" }
-cryypt_key = { path = "../../../cryypt/key" }
+cryypt_quic = { path = "../cryypt/quic" }
+cryypt_cipher = { path = "../cryypt/cipher" }
+cryypt_key = { path = "../cryypt/key" }

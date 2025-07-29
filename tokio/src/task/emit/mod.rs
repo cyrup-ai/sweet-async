@@ -8,6 +8,7 @@ pub mod builder;
 pub mod channel_builder;
 pub mod collector;
 pub mod event;
+pub mod task;
 
 // Use the channel-based implementations
 pub use channel_builder::{
@@ -225,9 +226,8 @@ where
     }
 
     fn event_type(&self) -> &StreamingEventType<T> {
-        // We need a static reference, and we know this is a Final event
-        // Use Box::leak to create a 'static reference
-        Box::leak(Box::new(StreamingEventType::Final(None)))
+        // Use Box::leak to create a 'static reference, avoiding Option mismatch by using unit type
+        Box::leak(Box::new(StreamingEventType::Final(())))
     }
 
     fn is_final(&self) -> bool {

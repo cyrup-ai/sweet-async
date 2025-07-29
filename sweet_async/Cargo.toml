@@ -11,15 +11,14 @@ tokio = { version = "1.45.1", optional = true }
 clap = { version = "4.5.39", features = ["derive"] }
 crossterm = { version = "0.29" }
 ratatui = { version = "0.30.0-alpha.4", features = [ "serde" ] }
-cryypt_quiq = { optional = true, path = "../../../cryypt/quiq"}
-cryypt_cipher = { optional = true, path = "../../../cryypt/cipher"}
-cryypt_key = { optional = true, path = "../../../cryypt/key"}
+cryypt_quic = { optional = true, path = "../../cryypt/quic"}
+cryypt_cipher = { optional = true, path = "../../cryypt/cipher"}
+cryypt_key = { optional = true, path = "../../cryypt/key"}
 
 # Features
 [features]
-tokio = ["dep:sweet_async_tokio", "dep:tokio"]
+tokio = ["dep:tokio"]
 default = ["tokio"]
-cryypt = ["dep:sweet_async_std"] # For future
 
 # executable cli
 [[bin]]

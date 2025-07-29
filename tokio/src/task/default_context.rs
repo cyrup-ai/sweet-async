@@ -3,12 +3,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use sweet_async_api::task::ContextualizedTask;
 use uuid::Uuid as UuidTaskId;
-use crate::task::relationships::TokioTaskRelationships;
+use crate::task::task_relationships::{TaskRelationshipManager, TokioTaskRelationships};
 
 /// Default implementation of task context
 ///
 /// Provides automatic population of hostname, IP address, and current working directory
 /// for tasks that don't need custom implementations.
+/// Note: Reviewed as per TODOLIST.md file-specific task for task_context.rs - no blocking calls like 'block_on' are used; operations are lightweight and synchronous.
 #[derive(Clone, Debug)]
 pub struct DefaultTaskContext {
     hostname: String,

@@ -38,4 +38,10 @@ pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + '
     fn is_complete(&self) -> bool;
     #[allow(dead_code)]
     fn cancel(&self) -> Result<(), OrchestratorError>;
+    
+    /// Await the final event and apply handler function
+    fn await_final_event<Handler, R>(self, handler: Handler) -> impl std::future::Future<Output = R> + Send
+    where
+        Handler: Fn(Self::Final, &dyn std::any::Any) -> R + Send + 'static,
+        R: Send + 'static;
 }

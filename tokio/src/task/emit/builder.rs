@@ -148,10 +148,9 @@ where
     where
         F: AsyncWork<EOverall> + Send + 'static,
     {
-        // For now, just run the final handler directly
-        // In a real implementation, this would coordinate the sender/receiver tasks
+        // Note: Awaiting full coordination of sender/receiver tasks for result aggregation with channel logic or orchestrator
+        // Temporary implementation until recovery and fallback logic are integrated as per TODOLIST.md task for emit/builder.rs
         let overall_result = final_handler.run().await;
         Ok(overall_result)
     }
 }
-

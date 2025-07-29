@@ -1,6 +1,81 @@
 # TODOLIST for `sweet_async` Tokio Implementation
 
-This is a comprehensive list of all remaining items required for a robust, production-quality implementation of the Tokio backend for `sweet_async`. This list is based on the API contract, README usage patterns, and best practices for async Rust. All items must be completed before the crate is considered done. 
+This is a comprehensive list of all remaining items required for a robust, production-quality implementation of the Tokio backend for `sweet_async`. This list is based on the API contract, README usage patterns, and best practices for async Rust. All items must be completed before the crate is considered done.
+
+## 🚨 CRITICAL PRIORITY: ACTUAL API TRAIT IMPLEMENTATION
+
+**BLOCKING ISSUE**: The tokio crate does NOT implement the actual API traits. We have structs that claim to implement traits but don't actually implement the trait contracts defined in the API.
+
+### Mirror API Directory Structure and Create Actual Trait Implementations
+
+#### TASK 1: Create TokioAsyncTask struct implementing AsyncTask<T, I> trait
+**File:** `tokio/src/task/async_task.rs` (lines 1-500, complete rewrite)
+**Specification:** 
+- Define `pub struct TokioAsyncTask<T: Clone + Send + 'static, I: TaskId>` with tokio-specific fields (JoinHandle, runtime handle, task config)
+- Implement `AsyncTask<T, I>` trait with `fn to<R, Task>() -> impl OrchestratorBuilder<R, Task, I>` and `fn emits<R, Task>() -> impl OrchestratorBuilder<R, Task, I>`
+- Implement ALL required super-traits: `PrioritizedTask<T>`, `CancellableTask<T>`, `TracingTask<T>`, `TimedTask<T>`, `ContextualizedTask<T, I>`, `RecoverableTask<T>`, `StatusEnabledTask<T>`, `MetricsEnabledTask<T>`, `NamedTask`
+- Architecture: Use tokio::task::JoinHandle for async execution, atomic counters for metrics, CancellationToken for cancellation
+- Performance: Zero allocation patterns, inline happy paths, efficient channel usage
+
+#### TASK 2: Create tokio emit task implementations
+**File:** `tokio/src/task/emit/task.rs` (lines 1-800, complete rewrite)
+**Specification:**
+- Define `pub struct TokioEmittingTask<T, C, E, I>` with tokio channels, runtime handle, atomic state
+- Define `pub struct TokioSenderTask<T, C, E, I>` with event sending capabilities  
+- Define `pub struct TokioReceiverTask<T, C, E, I>` with event processing capabilities
+- Implement `EmittingTask<T, C, E, I>` for TokioEmittingTask with `type Final = TokioFinalEvent<(), C, EItem, I>`
+- Implement `SenderTask<T, C, E, I>` for TokioSenderTask with `fn receiver(&self, receiver: F, strategy: ReceiverStrategy) -> TokioEmittingTask`
+- Implement `ReceiverTask<T, C, E, I>` for TokioReceiverTask with `fn emit_events(&self, receiver: F, strategy: ReceiverStrategy) -> TokioEmittingTask`
+- Architecture: Use tokio::sync::mpsc for event channels, atomic state tracking, CancellationToken for graceful shutdown
+
+#### TASK 3: Fix await_final_event method implementation  
+**File:** `tokio/src/task/emit/task.rs` (TokioEmittingTask implementation)
+**Current Issue:** Lines 469-513 in channel_builder.rs try to make handler deal with async channel work
+**Correct Implementation:**
+```rust
+fn await_final_event<Handler, R>(self, handler: Handler) -> impl Future<Output = R> + Send {
+    async move {
+        // 1. Internally collect all events from processing pipeline
+        let collected_results = self.collect_all_events().await;
+        // 2. Create TokioFinalEvent with collected results
+        let final_event = TokioFinalEvent::new((), collected_results, self.id);
+        // 3. Call handler with completed data (not futures)
+        handler(final_event, &collected_results as &dyn Any)
+    }
+}
+```
+**Architecture:** Handler receives completed data, not futures. Method does the awaiting internally, then calls handler with results.
+
+#### TASK 4: Implement all required super-trait implementations
+**Files:** Mirror every trait file from `api/src/task/` to `tokio/src/task/`
+**Specification:**
+- `tokio/src/task/cancellable_task.rs` → `TokioCancellableTask` implementing `CancellableTask<T>`
+- `tokio/src/task/recoverable_task.rs` → `TokioRecoverableTask` implementing `RecoverableTask<T>`
+- `tokio/src/task/named_task.rs` → `TokioNamedTask` implementing `NamedTask`
+- `tokio/src/task/timed_task.rs` → `TokioTimedTask` implementing `TimedTask<T>`
+- `tokio/src/task/tracing_task.rs` → `TokioTracingTask` implementing `TracingTask<T>`
+- Each struct must implement the exact trait methods defined in API with tokio-specific implementation details
+- Architecture: Use tokio primitives (JoinHandle, CancellationToken, Instant) for all implementations
+
+#### TASK 5: Update module exports to expose actual trait implementations
+**File:** `tokio/src/task/mod.rs` (add new exports)
+**Specification:**
+```rust
+pub use async_task::TokioAsyncTask;
+pub use emit::task::{TokioEmittingTask, TokioSenderTask, TokioReceiverTask};
+pub use cancellable_task::TokioCancellableTask;
+pub use recoverable_task::TokioRecoverableTask;
+// etc for all trait implementations
+```
+
+#### TASK 6: Remove broken implementations that don't implement traits
+**Files:** `tokio/src/task/emit/channel_builder.rs` (lines 455-514)
+**Action:** Remove the fake EmittingTask implementation that doesn't actually implement the trait
+**Move:** TokioEmittingTask struct definition from channel_builder.rs to task.rs
+
+**Performance Requirements:** Zero allocation, blazing-fast, no unsafe, no locking, elegant ergonomic code
+**Error Handling:** Never use unwrap() or expect() in src/ code, handle all Result/Option explicitly
+**Architecture:** Mirror API directory structure exactly, every API trait has corresponding tokio implementation 
 
 ## ✅ COMPLETED ITEMS
 

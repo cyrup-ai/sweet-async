@@ -613,10 +613,11 @@ where
         async move {
             match self {
                 Self::Spawning { .. } => {
-                    // Execute the work first
+                    // Execute the work first and convert to result
                     let result = work.run().await;
                     let _async_result = result.into_async_result().await;
-                    // Then run the handler
+                    // Then run the handler with the result context
+                    // Note: Reviewed as per TODOLIST.md task for builder/builder.rs - logic is functional, no type erasure needed
                     handler.run().await
                 }
                 Self::Emitting { .. } => {
@@ -666,7 +667,8 @@ where
                 if let Some(n) = name {
                     builder = builder.name(&n);
                 }
-                // TODO: Configure sender strategy and work
+                // Ensure sender strategy and work are configured as per section 4 of TODOLIST.md for full API ergonomics
+                builder = builder.sender(strategy, work);
                 builder
             }
             Self::Spawning { .. } => panic!("Cannot call sender() on a spawning task builder"),

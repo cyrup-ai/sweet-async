@@ -33,16 +33,16 @@ hostname = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 axum = { version = "0.8", optional = true }
 pingora = { version = "0.5.0", optional = true }
-cryypt_cipher = { optional = true, path = "../../../cryypt/cipher/cryypt_cipher"}
-cryypt_key = { optional = true, path = "../../../cryypt/cipher/cryypt_key"}
-cryypt_quiq = { optional = true, path = "../.../../cryypt/quiq/cryypt_quiq"}
+cryypt_cipher = { optional = true, path = "../../cryypt/cipher"}
+cryypt_key = { optional = true, path = "../../cryypt/key"}
+cryypt_quic = { optional = true, path = "../../cryypt/quic"}
 
 [features]
 default = []
 
 server = ["dep:pingora", "axum"]
-quiq = ["dep:cryypt_quiq"]
-cryypt = ["dep:cryypt_cipher", "dep:cryypt_key", "dep:cryypt_quiq"]
+quic = ["dep:cryypt_quic"]
+cryypt = ["dep:cryypt_cipher", "dep:cryypt_key", "dep:cryypt_quic"]
 
 [dev-dependencies]
 cargo-nextest = "0.9"

@@ -428,39 +428,22 @@ impl<
             Ok(Ok(result)) => {
                 // Convert AsyncTaskError to EOverall
                 // This requires EOverall to be convertible from AsyncTaskError
-                // For now, we'll require EOverall = AsyncTaskError
+                // Note: Using unsafe transmute as a temporary measure until EOverall conversion is defined
                 result.map_err(|e| unsafe { std::mem::transmute_copy(&e) })
             }
             Ok(Err(_)) => {
                 // Channel error
+                // Note: Using unsafe transmute as a temporary measure until EOverall conversion is defined
                 Err(unsafe { std::mem::transmute_copy(&AsyncTaskError::Failure("Result channel closed".into())) })
             }
             Err(_) => {
                 // Timeout
+                // Note: Using unsafe transmute as a temporary measure until EOverall conversion is defined
                 Err(unsafe { std::mem::transmute_copy(&AsyncTaskError::Timeout(self.task_timeout)) })
             }
         }
     }
 }
 
-// Implement EmittingTask trait
-impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    EItem: Send + Sync + 'static,
-    EOverall: Send + 'static,
-    I: TaskId,
-> EmittingTask<T, C, EOverall, I> for TokioEmittingTask<T, C, EItem, EOverall, I>
-{
-    type Final = super::TokioFinalEvent<(), C, EItem, I>;
-
-    fn is_complete(&self) -> bool {
-        !self.is_running.load(Ordering::Relaxed)
-    }
-
-    fn cancel(&self) -> Result<(), sweet_async_api::orchestra::OrchestratorError> {
-        self.cancel_token.cancel();
-        self.is_running.store(false, Ordering::SeqCst);
-        Ok(())
-    }
-}
+// NOTE: EmittingTask trait implementation has been moved to task.rs
+// This file now contains only internal channel-based implementation details

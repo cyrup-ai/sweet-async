@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::task::{TaskId, TaskStatus, AsyncTaskError};
 use crate::task::task_communication::TaskEnvelope;
-use cryypt::Cipher;
+
+#[cfg(feature = "cryypt")]
+use cryypt_cipher::Cipher;
 
 /// Trait for building task messages with a fluent API
 pub trait TaskMessageBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {
@@ -13,7 +15,8 @@ pub trait TaskMessageBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {
     fn correlation_id(self, id: impl Into<String>) -> Self;
 
     /// Set the cipher for encryption
-    fn cipher(self, cipher: Arc<Cipher>) -> Self;
+    #[cfg(feature = "cryypt")]
+    fn cipher(self, cipher: std::sync::Arc<Cipher>) -> Self;
 
     /// Enable encryption for this message
     fn encrypt(self) -> Self;

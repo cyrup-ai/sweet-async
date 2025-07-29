@@ -22,6 +22,7 @@ rustc-args = ["--document-private-items"]
 [dependencies]
 sweet_async_api = { path  = "../api"}
 tokio = { version = "1.45.1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+async-trait = "0.1"
 tokio-stream = "0.1"
 futures-core = "0.3"
 futures-util = "0.3"
@@ -36,14 +37,15 @@ rand = "0.9.1"
 tokio-util = "0.7"
 hostname = "0.4.1"
 bincode = "2.0.1"
-cryypt-cipher = { optional = true, path = "../../../../cryypt/cipher"}
-cryypt-key = { optional = true, path = "../../../../cryypt/cipher"}
-cryypt-quiq = { optional = true, path = "../../../cryypt/quiq"}
+serde_json = "1.0"
+cryypt_cipher = { optional = true, path = "../../cryypt/cipher"}
+cryypt_key = { optional = true, path = "../../cryypt/key"}
+cryypt_quic = { optional = true, path = "../../cryypt/quic"}
 
 [features]
 default = []
 # Enable encryption support for task communication
-encryption = ["cryypt-cipher", "cryypt-key", "cryypt-quiq"]
+encryption = ["cryypt_cipher", "cryypt_key", "cryypt_quic"]
 # Enable metrics collection
 metrics = []
 # Enable distributed task support with vector clocks

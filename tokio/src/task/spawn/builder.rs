@@ -40,6 +40,7 @@ where
     I: TaskId,
 {
     /// Create a new spawning task builder
+    // Note: Check for E0061 error as per TODOLIST.md Priority 5, line 47. Ensure signature matches expected usage.
     pub fn new(
         runtime: tokio::runtime::Handle,
         active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
