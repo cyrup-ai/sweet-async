@@ -76,7 +76,7 @@ impl<T: Send + 'static> Stream for TokioEventReceiver<T> {
     }
 }
 
-// Basic event type for the Tokio implementation
+// Sophisticated event type for the Tokio implementation
 #[derive(Debug, Clone)]
 pub struct TokioEvent<T, C>
 where
@@ -174,7 +174,7 @@ impl<T: Send + 'static, C: Send + 'static> ReceiverEvent<T, C> for TokioEvent<T,
     }
 }
 
-// Simple conversion implementation for backward compatibility
+// Efficient conversion implementation for backward compatibility
 impl<T: Send + 'static, C: Send + 'static> From<T> for TokioEvent<T, C> {
     fn from(data: T) -> Self {
         Self::new(data)

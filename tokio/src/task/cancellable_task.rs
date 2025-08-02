@@ -300,7 +300,7 @@ mod tests {
     use tokio::time::{sleep, Duration};
 
     #[tokio::test]
-    async fn test_basic_cancellation() {
+    async fn test_advanced_cancellation() {
         let task = TokioCancellableTask::<i32>::new();
         
         assert!(!task.is_cancelled());

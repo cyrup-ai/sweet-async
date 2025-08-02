@@ -4,7 +4,6 @@
 
 // These modules are now available for use
 pub mod async_work_wrapper;
-pub mod builder;
 pub mod channel_builder;
 pub mod collector;
 pub mod event;

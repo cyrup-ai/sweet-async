@@ -22,6 +22,7 @@ pub struct TokioRuntime {
     handle: Handle,
     is_running: AtomicBool,
     active_tasks: Arc<AtomicUsize>,
+    _runtime: Option<Arc<tokio::runtime::Runtime>>, // Keep custom runtime alive, zero allocation when None
 }
 
 impl TokioRuntime {
@@ -31,6 +32,17 @@ impl TokioRuntime {
             handle: Handle::current(),
             is_running: AtomicBool::new(true),
             active_tasks: Arc::new(AtomicUsize::new(0)),
+            _runtime: None, // No custom runtime, zero allocation
+        }
+    }
+
+    /// Create a runtime with custom tokio::runtime::Runtime for sophisticated configuration
+    pub fn with_custom_runtime(handle: Handle, runtime: Arc<tokio::runtime::Runtime>) -> Self {
+        Self {
+            handle,
+            is_running: AtomicBool::new(true),
+            active_tasks: Arc::new(AtomicUsize::new(0)),
+            _runtime: Some(runtime), // Keep custom runtime alive
         }
     }
 }
@@ -41,6 +53,7 @@ impl Clone for TokioRuntime {
             handle: self.handle.clone(),
             is_running: AtomicBool::new(self.is_running.load(Ordering::SeqCst)),
             active_tasks: self.active_tasks.clone(),
+            _runtime: self._runtime.clone(), // Arc clone is zero allocation
         }
     }
 }

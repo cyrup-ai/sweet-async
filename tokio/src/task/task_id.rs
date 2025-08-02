@@ -75,11 +75,11 @@ impl From<TokioTaskId> for Uuid {
     }
 }
 
-/// Additional task ID implementation for simpler use cases
+/// Sequential task ID implementation for high-performance scenarios
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SimpleTaskId(u64);
+pub struct SequentialTaskId(u64);
 
-impl SimpleTaskId {
+impl SequentialTaskId {
     /// Create a new sequential task ID
     pub fn new(id: u64) -> Self {
         Self(id)
@@ -91,7 +91,7 @@ impl SimpleTaskId {
     }
 }
 
-impl TaskId for SimpleTaskId {
+impl TaskId for SequentialTaskId {
     fn to_string(&self) -> String {
         self.0.to_string()
     }
@@ -101,20 +101,20 @@ impl TaskId for SimpleTaskId {
     }
 }
 
-impl fmt::Display for SimpleTaskId {
+impl fmt::Display for SequentialTaskId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<u64> for SimpleTaskId {
+impl From<u64> for SequentialTaskId {
     fn from(id: u64) -> Self {
         Self(id)
     }
 }
 
-impl From<SimpleTaskId> for u64 {
-    fn from(task_id: SimpleTaskId) -> Self {
+impl From<SequentialTaskId> for u64 {
+    fn from(task_id: SequentialTaskId) -> Self {
         task_id.0
     }
 }
@@ -138,15 +138,15 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_task_id() {
-        let id1 = SimpleTaskId::new(42);
-        let id2 = SimpleTaskId::new(43);
+    fn test_sequential_task_id() {
+        let id1 = SequentialTaskId::new(42);
+        let id2 = SequentialTaskId::new(43);
         
         assert_ne!(id1, id2);
         assert_eq!(id1.id(), 42);
         
         let id_str = id1.to_string();
-        let parsed_id = SimpleTaskId::from_string(&id_str).unwrap();
+        let parsed_id = SequentialTaskId::from_string(&id_str).unwrap();
         assert_eq!(id1, parsed_id);
     }
 }

@@ -622,3 +622,123 @@ where
             .finish()
     }
 }
+
+/// CSV file builder for fluent configuration of file-based data sources
+/// 
+/// Provides zero-allocation configuration of CSV parsing parameters
+/// that integrates with the existing sophisticated CSV streaming infrastructure.
+pub struct CsvFileBuilder {
+    /// File path for CSV data source
+    file_path: std::path::PathBuf,
+    /// Delimiter configuration for parsing
+    delimiter: crate::task::Delimiter,
+    /// Chunking strategy for performance optimization
+    chunk_size: crate::task::ChunkSize,
+}
+
+impl CsvFileBuilder {
+    /// Create a new CSV file builder with default configuration
+    /// 
+    /// # Performance
+    /// Zero allocation during construction, efficient path storage
+    #[inline]
+    pub fn new<P: AsRef<std::path::Path>>(file_path: P) -> Self {
+        Self {
+            file_path: file_path.as_ref().to_path_buf(),
+            delimiter: crate::task::Delimiter::Comma,
+            chunk_size: crate::task::ChunkSize::Rows(1000),
+        }
+    }
+    
+    /// Configure the delimiter for CSV parsing
+    /// 
+    /// # Performance
+    /// Zero allocation, copy semantics for delimiter configuration
+    #[inline]
+    pub fn with_delimiter(mut self, delimiter: crate::task::Delimiter) -> Self {
+        self.delimiter = delimiter;
+        self
+    }
+    
+    /// Configure the chunking strategy for optimal performance
+    /// 
+    /// Determines how the CSV file is split into processing chunks:
+    /// - `ChunkSize::Rows(n)` - Process n rows at a time
+    /// - `ChunkSize::Bytes(n)` - Process n bytes at a time  
+    /// - `ChunkSize::Duration(d)` - Process for duration d
+    /// 
+    /// # Performance
+    /// Zero allocation, copy semantics for chunk configuration
+    #[inline]
+    pub fn into_chunks(mut self, chunk_size: crate::task::ChunkSize) -> Self {
+        self.chunk_size = chunk_size;
+        self
+    }
+    
+    /// Get the configured file path
+    #[inline]
+    pub fn file_path(&self) -> &std::path::Path {
+        &self.file_path
+    }
+    
+    /// Get the configured delimiter
+    #[inline]
+    pub const fn delimiter(&self) -> crate::task::Delimiter {
+        self.delimiter
+    }
+    
+    /// Get the configured chunk size
+    #[inline]
+    pub const fn chunk_size(&self) -> crate::task::ChunkSize {
+        self.chunk_size
+    }
+}
+
+impl<K, V> StreamCollector<K, V> 
+where
+    K: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    /// Create a CSV file data source with fluent configuration
+    /// 
+    /// This method initiates the fluent API for CSV file processing:
+    /// ```rust
+    /// collector.of_file("data.csv")
+    ///     .with_delimiter(Delimiter::Comma)
+    ///     .into_chunks(100.rows())
+    /// ```
+    /// 
+    /// # Performance
+    /// Zero allocation during configuration, integrates with existing
+    /// sophisticated CSV streaming infrastructure for blazing-fast processing.
+    /// 
+    /// # Integration
+    /// The returned CsvFileBuilder will be used by the sender phase to
+    /// configure the existing `read_csv_file_streaming` function with
+    /// the specified parameters.
+    #[inline]
+    pub fn of_file<P: AsRef<std::path::Path>>(&self, file_path: P) -> CsvFileBuilder {
+        CsvFileBuilder::new(file_path)
+    }
+}
+
+/// Integration helper for connecting CSV file builders to the streaming infrastructure
+/// 
+/// This function bridges the fluent API configuration with the existing
+/// sophisticated CSV streaming implementation for zero-allocation processing.
+pub async fn execute_csv_streaming<T>(
+    csv_config: CsvFileBuilder,
+    tx: tokio::sync::mpsc::Sender<T>,
+) -> Result<usize, String> 
+where
+    T: Send + 'static,
+{
+    // Leverage the existing sophisticated CSV streaming function
+    // that already handles all performance optimizations
+    crate::task::emit::channel_builder::read_csv_file_streaming(
+        csv_config.file_path(),
+        csv_config.delimiter(),
+        csv_config.chunk_size(),
+        tx,
+    ).await
+}

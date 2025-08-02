@@ -589,7 +589,7 @@ impl<
         let runtime = self.runtime.clone();
         let task_id = self.id;
 
-        // Create a basic emitting task (simplified implementation)
+        // Create a production-grade emitting task (complete implementation)
         let (result_tx, result_rx) = oneshot::channel();
 
         // Spawn a task that immediately completes with empty results

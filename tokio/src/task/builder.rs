@@ -5,6 +5,7 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use sweet_async_api::task::TaskId;
@@ -13,8 +14,6 @@ pub use sweet_async_api::task::builder::{
     SenderStrategy,
 };
 use tokio::runtime::Handle;
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 
 // Export the DefaultOrchestratorBuilder from the nested module
 pub mod builder;
@@ -34,8 +33,8 @@ where
     name: Option<String>,
     /// Tokio runtime handle
     runtime: Handle,
-    /// Active tasks registry
-    active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    /// Active tasks counter (lock-free)
+    active_tasks: Arc<AtomicUsize>,
     /// Timeout for task execution
     timeout: Duration,
     /// Number of retry attempts
@@ -51,10 +50,10 @@ where
     T: Send + 'static,
     I: TaskId,
 {
-    /// Create a new builder with the specified runtime and active tasks registry
+    /// Create a new builder with the specified runtime and active tasks counter
     pub fn new_with_runtime(
         runtime: Handle,
-        active_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        active_tasks: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             name: None,
@@ -72,8 +71,8 @@ where
         &self.runtime
     }
 
-    /// Get the active tasks registry
-    pub fn active_tasks(&self) -> &Arc<Mutex<Vec<JoinHandle<()>>>> {
+    /// Get the active tasks counter
+    pub fn active_tasks(&self) -> &Arc<AtomicUsize> {
         &self.active_tasks
     }
 
@@ -106,7 +105,7 @@ where
     /// Create a new builder instance with default settings
     fn new() -> Self {
         let runtime = Handle::current();
-        let active_tasks = Arc::new(Mutex::new(Vec::new()));
+        let active_tasks = Arc::new(AtomicUsize::new(0));
         Self::new_with_runtime(runtime, active_tasks)
     }
 

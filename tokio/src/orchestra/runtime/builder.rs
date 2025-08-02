@@ -35,9 +35,45 @@ impl<T: Clone + Send + 'static, I: TaskId> RuntimeBuilder<T, I> for TokioRuntime
     }
 
     fn build(self) -> impl Runtime<T, I> {
-        // For now, return TokioRuntime using current handle
-        // In a full implementation, we'd use the worker_threads and stack_size
-        // to configure a new tokio::runtime::Runtime
-        TokioRuntime::new()
+        // Zero allocation fast path: if no custom configuration, use current handle
+        if self.worker_threads.is_none() && self.stack_size.is_none() {
+            return TokioRuntime::new(); // Zero allocation, blazing fast
+        }
+
+        // Sophisticated custom runtime creation with validation and graceful degradation
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+
+        // Validate and configure worker threads with graceful degradation
+        if let Some(threads) = self.worker_threads {
+            if threads > 0 && threads <= 1024 { // Prevent resource exhaustion
+                builder.worker_threads(threads);
+            } else {
+                // Invalid config: fallback to current handle
+                return TokioRuntime::new();
+            }
+        }
+
+        // Validate and configure stack size with sensible bounds
+        if let Some(stack_size) = self.stack_size {
+            if stack_size >= 131072 && stack_size <= 8388608 { // 128KB to 8MB range
+                builder.thread_stack_size(stack_size);
+            } else {
+                // Invalid config: fallback to current handle  
+                return TokioRuntime::new();
+            }
+        }
+
+        // Build custom runtime with complete error handling
+        match builder.build() {
+            Ok(runtime) => {
+                let handle = runtime.handle().clone();
+                let runtime_arc = std::sync::Arc::new(runtime);
+                TokioRuntime::with_custom_runtime(handle, runtime_arc)
+            }
+            Err(_) => {
+                // Runtime creation failed (insufficient resources, etc): graceful fallback
+                TokioRuntime::new()
+            }
+        }
     }
 }

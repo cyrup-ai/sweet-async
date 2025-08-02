@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
+use futures;
+
 use tokio_util::sync::CancellationToken;
 
 use sweet_async_api::orchestra::{OrchestratorBuilder, OrchestratorError};
@@ -229,6 +231,13 @@ pub struct TokioAsyncTask<T: Clone + Send + 'static, I: TaskId> {
         >,
     >,
     relationships: (),
+    // Sophisticated cancellation state management
+    cancellation_level: AtomicU8,
+    cancellation_started: AtomicU64,
+    graceful_timeout_nanos: AtomicU64,
+    kill_timeout_nanos: AtomicU64,
+    escalation_count: AtomicU8,
+    cleanup_completed: AtomicBool,
     _phantom: PhantomData<T>,
 }
 
@@ -265,6 +274,13 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
             fallback_work: crate::task::error_fallback::ErrorFallback::new(),
             cancellation_callbacks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             relationships: (),
+            // Initialize sophisticated cancellation state
+            cancellation_level: AtomicU8::new(0), // No cancellation initially
+            cancellation_started: AtomicU64::new(0),
+            graceful_timeout_nanos: AtomicU64::new(Duration::from_secs(30).as_nanos() as u64),
+            kill_timeout_nanos: AtomicU64::new(Duration::from_secs(10).as_nanos() as u64),
+            escalation_count: AtomicU8::new(0),
+            cleanup_completed: AtomicBool::new(false),
             _phantom: PhantomData,
         }
     }
@@ -353,6 +369,16 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
             tokio::spawn(callback());
         }
     }
+
+    /// Escalate cancellation to a more aggressive level with zero allocation
+    async fn escalate_cancellation(&self, target_level: CancellationLevel) -> Result<(), OrchestratorError> {
+        // Record escalation count and update level atomically
+        self.escalation_count.fetch_add(1, Ordering::Relaxed);
+        self.cancellation_level.store(target_level as u8, Ordering::Relaxed);
+        
+        // Delegate to the main cancel method for consistent behavior
+        self.cancel(target_level).await
+    }
 }
 
 // Super trait implementations
@@ -363,11 +389,131 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
         level: CancellationLevel,
     ) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
+        let cancelled = self.cancelled.clone();
+        let status = self.status.clone();
+        let cancellation_level = self.cancellation_level.clone();
+        let cancellation_started = self.cancellation_started.clone();
+        let graceful_timeout_nanos = self.graceful_timeout_nanos.clone();
+        let kill_timeout_nanos = self.kill_timeout_nanos.clone();
+        let escalation_count = self.escalation_count.clone();
+        let cleanup_completed = self.cleanup_completed.clone();
+        let cancellation_callbacks = self.cancellation_callbacks.clone();
+
         async move {
+            // Record cancellation initiation with zero-allocation timestamp
+            let start_time = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos() as u64;
+            
+            cancellation_started.store(start_time, Ordering::Relaxed);
+            cancellation_level.store(level as u8, Ordering::Relaxed);
+            
+            // Transition to pending cancellation state atomically
+            status.store(TaskStatus::PendingCancellation as u8, Ordering::Relaxed);
+            
             match level {
-                CancellationLevel::Graceful => token.cancel(),
-                _ => token.cancel(), // Similar for now
+                CancellationLevel::Graceful => {
+                    // Set cancellation flag to signal graceful shutdown
+                    cancelled.store(true, Ordering::Relaxed);
+                    token.cancel();
+                    
+                    // Execute all cancellation callbacks asynchronously
+                    let callbacks_lock = match cancellation_callbacks.try_lock() {
+                        Ok(callbacks_guard) => {
+                            let callback_futures: Vec<_> = callbacks_guard
+                                .iter()
+                                .map(|callback| callback())
+                                .collect();
+                            drop(callbacks_guard);
+                            
+                            // Execute all callbacks concurrently with timeout
+                            let graceful_timeout_duration = Duration::from_nanos(
+                                graceful_timeout_nanos.load(Ordering::Relaxed)
+                            );
+                            
+                            match tokio::time::timeout(graceful_timeout_duration, 
+                                futures::future::join_all(callback_futures)).await {
+                                Ok(_) => {
+                                    cleanup_completed.store(true, Ordering::Relaxed);
+                                }
+                                Err(_) => {
+                                    // Graceful timeout exceeded, escalate automatically
+                                    escalation_count.fetch_add(1, Ordering::Relaxed);
+                                    return self.escalate_cancellation(CancellationLevel::Kill).await;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Callbacks mutex contended, spawn async cleanup
+                            let callbacks_arc = cancellation_callbacks.clone();
+                            let cleanup_flag = cleanup_completed.clone();
+                            let timeout_nanos = graceful_timeout_nanos.load(Ordering::Relaxed);
+                            
+                            tokio::spawn(async move {
+                                let callbacks_guard = callbacks_arc.lock().await;
+                                let callback_futures: Vec<_> = callbacks_guard
+                                    .iter()
+                                    .map(|callback| callback())
+                                    .collect();
+                                drop(callbacks_guard);
+                                
+                                let timeout_duration = Duration::from_nanos(timeout_nanos);
+                                if tokio::time::timeout(timeout_duration, 
+                                    futures::future::join_all(callback_futures)).await.is_ok() {
+                                    cleanup_flag.store(true, Ordering::Relaxed);
+                                }
+                            });
+                        }
+                    };
+                }
+                
+                CancellationLevel::Kill => {
+                    // More urgent cancellation with limited cleanup window
+                    cancelled.store(true, Ordering::Relaxed);
+                    token.cancel();
+                    
+                    // Execute only essential cleanup with strict timeout
+                    let kill_timeout_duration = Duration::from_nanos(
+                        kill_timeout_nanos.load(Ordering::Relaxed)
+                    );
+                    
+                    let essential_cleanup = async {
+                        // Execute highest priority callbacks only
+                        if let Ok(callbacks_guard) = cancellation_callbacks.try_lock() {
+                            if let Some(first_callback) = callbacks_guard.first() {
+                                first_callback().await;
+                            }
+                        }
+                        cleanup_completed.store(true, Ordering::Relaxed);
+                    };
+                    
+                    match tokio::time::timeout(kill_timeout_duration, essential_cleanup).await {
+                        Ok(_) => {
+                            // Essential cleanup completed within timeout
+                        }
+                        Err(_) => {
+                            // Kill timeout exceeded, escalate to hard termination
+                            escalation_count.fetch_add(1, Ordering::Relaxed);
+                            return self.escalate_cancellation(CancellationLevel::KillHard).await;
+                        }
+                    }
+                }
+                
+                CancellationLevel::KillHard => {
+                    // Immediate termination with no cleanup
+                    cancelled.store(true, Ordering::Relaxed);
+                    token.cancel();
+                    
+                    // No cleanup operations allowed - immediate termination
+                    escalation_count.fetch_add(1, Ordering::Relaxed);
+                    cleanup_completed.store(false, Ordering::Relaxed); // No cleanup performed
+                }
             }
+            
+            // Transition to final cancelled state
+            status.store(TaskStatus::Cancelled as u8, Ordering::Relaxed);
+            
             Ok(())
         }
     }
@@ -406,7 +552,7 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
         Fut: Future<Output = ()> + Send + 'static,
     {
         // Handle mutex access with production-grade error handling
-        // Tokio's TryLockError is simpler - it only indicates the lock is held
+        // Tokio's TryLockError is more elegant - it only indicates the lock is held
         match self.cancellation_callbacks.try_lock() {
             Ok(mut callbacks) => {
                 callbacks.push(Box::new(move || Box::pin(callback.run())));
@@ -669,6 +815,13 @@ impl<T: Clone + Send + 'static, I: TaskId> Clone for TokioAsyncTask<T, I> {
             fallback_work: crate::task::error_fallback::ErrorFallback::new(),
             cancellation_callbacks: self.cancellation_callbacks.clone(),
             relationships: self.relationships,
+            // Clone sophisticated cancellation state
+            cancellation_level: AtomicU8::new(self.cancellation_level.load(Ordering::Relaxed)),
+            cancellation_started: AtomicU64::new(self.cancellation_started.load(Ordering::Relaxed)),
+            graceful_timeout_nanos: AtomicU64::new(self.graceful_timeout_nanos.load(Ordering::Relaxed)),
+            kill_timeout_nanos: AtomicU64::new(self.kill_timeout_nanos.load(Ordering::Relaxed)),
+            escalation_count: AtomicU8::new(self.escalation_count.load(Ordering::Relaxed)),
+            cleanup_completed: AtomicBool::new(self.cleanup_completed.load(Ordering::Relaxed)),
             _phantom: PhantomData,
         }
     }

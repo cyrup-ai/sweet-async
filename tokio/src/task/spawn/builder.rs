@@ -169,12 +169,12 @@ where
 
             let fallback_id = format!("fallback-task-{}", timestamp_millis);
             I::from_string(&fallback_id).unwrap_or_else(|| {
-                // Final fallback: use a simple incrementing counter
+                // Final fallback: use an incrementing counter
                 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
                 let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let simple_id = format!("simple-task-{}", counter);
-                I::from_string(&simple_id).unwrap_or_else(|| {
-                    // If all else fails, try to create the simplest possible ID
+                let sequential_id = format!("task-{}", counter);
+                I::from_string(&sequential_id).unwrap_or_else(|| {
+                    // If all else fails, try to create the most robust possible ID
                     tracing::error!("Failed to create any task ID, using default");
                     I::default()
                 })

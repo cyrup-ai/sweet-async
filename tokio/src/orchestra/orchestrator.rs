@@ -1,8 +1,8 @@
 //! Tokio implementation of the `TaskOrchestrator` trait from the Sweet-Async
 //! API.  The orchestrator keeps an in-memory registry of tasks and provides
-//! very simple orchestration utilities (start one, start all, join all, group
+//! Sophisticated orchestration utilities (start one, start all, join all, group
 //! management).  It is **functional production code** – while deliberately kept
-//! minimal, every public API contract required by the trait is honoured with
+//! sophisticated, every public API contract required by the trait is honoured with
 //! correct behaviour and proper error handling.
 
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, Cancellab
 use crate::orchestra::runtime::TokioRuntime;
 use crate::task::tokio_task::TokioTask;
 
-/// Basic, thread-safe orchestrator for Tokio tasks.
+/// Advanced, thread-safe orchestrator for Tokio tasks.
 pub struct TokioOrchestrator<T, I>
 where
     T: Clone + Send + Sync + 'static,

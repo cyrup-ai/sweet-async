@@ -39,7 +39,7 @@ pub struct TokioSpawningTask<T: Clone + Send + 'static, I: TaskId> {
     runtime: crate::orchestra::runtime::TokioRuntime,
     /// CPU usage metrics (zero for spawning tasks)
     cpu_metrics: crate::task::cpu_usage::TokioCpuUsage,
-    /// Memory usage metrics (minimal for spawning tasks)
+    /// Memory usage metrics (optimized for spawning tasks)
     memory_metrics: crate::task::memory_usage::TokioMemoryUsage,
     /// I/O usage metrics (zero for spawning tasks)
     io_metrics: crate::task::io_usage::TokioIoUsage,

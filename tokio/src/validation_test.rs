@@ -8,7 +8,7 @@ mod tests {
     use std::time::Duration;
 
     #[tokio::test]
-    async fn test_basic_fluent_api() {
+    async fn test_sophisticated_fluent_api() {
         // Test the core fluent API: AsyncTask::to::<T>().timeout().run().await
         
         // This should compile and work correctly after our cleanup

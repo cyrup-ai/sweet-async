@@ -43,6 +43,7 @@ pub use cancellable_task::*;
 pub use cpu_usage::*;
 pub use emit::task::{TokioEmittingTask, TokioSenderTask, TokioReceiverTask};
 pub use emit::TokioFinalEvent;
+pub use emit::collector::{StreamCollector, CsvFileBuilder, execute_csv_streaming};
 pub use io_usage::*;
 pub use memory_usage::*;
 pub use message_builder::*;
@@ -58,6 +59,15 @@ pub use task_relationships::*;
 pub use timed_task::*;
 pub use tracing_task::*;
 pub use tokio_task::*;
+
+// CSV processing types
+pub use CsvRecord;
+pub use FromCsvLine;
+pub use CsvParseError;
+pub use ChunkSize;
+pub use Delimiter;
+pub use DurationExt;
+pub use RowsExt;
 
 // Extension traits for ergonomic API syntax
 
@@ -242,5 +252,152 @@ impl Delimiter {
         }
     }
 }
+
+/// Zero-allocation CSV record for efficient parsing and processing
+/// 
+/// Uses string slices for zero-copy parsing where the record references
+/// data from the source buffer without allocation overhead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsvRecord<'a> {
+    /// Unique identifier for this record (typically first field or line number)
+    pub id: &'a str,
+    /// Raw data fields as zero-copy string slices
+    pub data: &'a [&'a str],
+    /// Source line number for debugging and error reporting
+    pub line_number: usize,
+}
+
+impl<'a> CsvRecord<'a> {
+    /// Create a new CSV record with zero allocation
+    /// 
+    /// # Performance
+    /// Uses string slices for zero-copy construction
+    #[inline(always)]
+    pub const fn new(id: &'a str, data: &'a [&'a str], line_number: usize) -> Self {
+        Self { id, data, line_number }
+    }
+    
+    /// Get the number of fields in this record
+    #[inline(always)]
+    pub const fn field_count(&self) -> usize {
+        self.data.len()
+    }
+    
+    /// Get a field by index with bounds checking
+    #[inline(always)]
+    pub fn get_field(&self, index: usize) -> Option<&'a str> {
+        self.data.get(index).copied()
+    }
+    
+    /// Check if this record is valid (has data)
+    #[inline(always)]
+    pub const fn is_valid(&self) -> bool {
+        !self.data.is_empty() && !self.id.is_empty()
+    }
+}
+
+/// Type-safe trait for parsing CSV lines into structured records
+/// 
+/// Enables zero-allocation parsing by working with string slices
+/// and reused parsing buffers for maximum performance.
+pub trait FromCsvLine<'a>: Sized {
+    /// Error type for parsing failures
+    type Error: std::error::Error + Send + Sync + 'static;
+    
+    /// Parse a CSV line into a typed record
+    /// 
+    /// # Arguments
+    /// * `line` - The raw CSV line as a string slice
+    /// * `line_number` - Line number for error reporting
+    /// * `delimiter` - The delimiter configuration to use
+    /// * `field_buffer` - Reusable buffer for field parsing (zero allocation)
+    /// 
+    /// # Performance
+    /// Implementations should use the provided field_buffer to avoid
+    /// allocations during parsing. The buffer can be reused across
+    /// multiple line parsing operations.
+    fn from_csv_line(
+        line: &'a str, 
+        line_number: usize, 
+        delimiter: Delimiter,
+        field_buffer: &'a mut Vec<&'a str>
+    ) -> Result<Self, Self::Error>;
+}
+
+/// Standard implementation for CsvRecord parsing
+impl<'a> FromCsvLine<'a> for CsvRecord<'a> {
+    type Error = CsvParseError;
+    
+    fn from_csv_line(
+        line: &'a str, 
+        line_number: usize, 
+        delimiter: Delimiter,
+        field_buffer: &'a mut Vec<&'a str>
+    ) -> Result<Self, Self::Error> {
+        // Clear and reuse the buffer for zero allocation
+        field_buffer.clear();
+        
+        // Parse fields using the delimiter
+        let delim_char = delimiter.as_char();
+        for field in line.split(delim_char) {
+            field_buffer.push(field.trim());
+        }
+        
+        // Validate we have at least one field
+        if field_buffer.is_empty() {
+            return Err(CsvParseError::EmptyLine { line_number });
+        }
+        
+        // Use first field as ID, all fields as data
+        let id = field_buffer[0];
+        let data = field_buffer.as_slice();
+        
+        Ok(CsvRecord::new(id, data, line_number))
+    }
+}
+
+/// Comprehensive error type for CSV parsing operations
+/// 
+/// Provides detailed error information for debugging and error handling
+/// without allocation overhead in the error path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CsvParseError {
+    /// Empty line encountered during parsing
+    EmptyLine { line_number: usize },
+    /// Invalid field count for expected schema
+    InvalidFieldCount { line_number: usize, expected: usize, actual: usize },
+    /// Field validation failed
+    InvalidField { line_number: usize, field_index: usize, reason: &'static str },
+    /// I/O error during file reading
+    IoError { message: String },
+    /// UTF-8 encoding error
+    EncodingError { line_number: usize },
+}
+
+impl std::fmt::Display for CsvParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CsvParseError::EmptyLine { line_number } => {
+                write!(f, "Empty line at line {}", line_number)
+            }
+            CsvParseError::InvalidFieldCount { line_number, expected, actual } => {
+                write!(f, "Invalid field count at line {}: expected {}, got {}", 
+                       line_number, expected, actual)
+            }
+            CsvParseError::InvalidField { line_number, field_index, reason } => {
+                write!(f, "Invalid field at line {}, field {}: {}", 
+                       line_number, field_index, reason)
+            }
+            CsvParseError::IoError { message } => {
+                write!(f, "I/O error: {}", message)
+            }
+            CsvParseError::EncodingError { line_number } => {
+                write!(f, "UTF-8 encoding error at line {}", line_number)
+            }
+        }
+    }
+}
+
+impl std::error::Error for CsvParseError {}
 
 // Extension traits are already exported via glob imports above
