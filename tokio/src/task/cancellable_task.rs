@@ -4,15 +4,15 @@
 //! shutdown, resource cleanup, and hierarchical cancellation propagation.
 
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
-use sweet_async_api::task::{CancellableTask, CancellationLevel, CancellationResult};
+use sweet_async_api::task::{CancellableTask, CancellationLevel, CancellationResult, AsyncTaskError};
 use sweet_async_api::orchestra::OrchestratorError;
-use crate::task::task_error::AsyncTaskError;
 
 /// Tokio-specific cancellation result
 #[derive(Debug, Clone)]
@@ -107,7 +107,7 @@ impl CancellationResult for TokioCancellationResult {
 }
 
 /// Cancellation callback type
-type CancellationCallback = Box<dyn Fn() -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>;
+type CancellationCallback = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
 
 /// Tokio-specific cancellable task implementation
 #[derive(Debug)]
@@ -218,46 +218,57 @@ impl<T: Send + 'static> Default for TokioCancellableTask<T> {
 }
 
 impl<T: Send + 'static> CancellableTask<T> for TokioCancellableTask<T> {
-    async fn cancel(&self, level: CancellationLevel) -> Result<(), OrchestratorError> {
-        // Set the cancellation flag atomically
-        self.cancelled.store(true, Ordering::SeqCst);
+    fn cancel(&self, level: CancellationLevel) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
+        let cancelled = self.cancelled.clone();
+        let cancellation_level = self.cancellation_level.clone();
+        let task_handle = self.task_handle.clone();
+        let child_tasks = self.children.clone();
         
-        // Store the cancellation level
-        {
-            let mut cancellation_level = self.cancellation_level.write().await;
-            *cancellation_level = Some(level);
-        }
-        
-        debug!("Cancelling task with level: {:?}", level);
-        
-        // Cancel all child tasks first
-        self.cancel_children(level).await;
-        
-        // Cancel the main task handle if it exists
-        {
-            let task_handle = self.task_handle.read().await;
-            if let Some(handle) = task_handle.as_ref() {
-                handle.abort();
+        async move {
+            // Set the cancellation flag atomically
+            cancelled.store(true, Ordering::SeqCst);
+            
+            // Store the cancellation level
+            {
+                let mut level_guard = cancellation_level.write().await;
+                *level_guard = Some(level);
             }
+            
+            tracing::debug!("Cancelling task with level: {:?}", level);
+            
+            // Cancel all child tasks first
+            {
+                let children = child_tasks.read().await;
+                for child in children.iter() {
+                    if let Err(e) = child.cancel_immediately().await {
+                        warn!("Failed to cancel child task: {:?}", e);
+                    }
+                }
+            }
+            
+            // Cancel the main task handle if it exists
+            {
+                let handle_guard = task_handle.read().await;
+                if let Some(handle) = handle_guard.as_ref() {
+                    handle.abort();
+                }
+            }
+            
+            tracing::debug!("Task cancellation completed");
+            Ok(())
         }
-        
-        // Perform cleanup based on level
-        self.perform_cleanup(level).await;
-        
-        debug!("Task cancellation completed");
-        Ok(())
     }
 
-    async fn cancel_gracefully(&self) -> Result<(), OrchestratorError> {
-        self.cancel(CancellationLevel::Graceful).await
+    fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
+        self.cancel(CancellationLevel::Graceful)
     }
 
-    async fn cancel_forcefully(&self) -> Result<(), OrchestratorError> {
-        self.cancel(CancellationLevel::Kill).await
+    fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
+        self.cancel(CancellationLevel::Kill)
     }
 
-    async fn cancel_immediately(&self) -> Result<(), OrchestratorError> {
-        self.cancel(CancellationLevel::KillHard).await
+    fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
+        self.cancel(CancellationLevel::KillHard)
     }
 
     fn is_cancelled(&self) -> bool {
@@ -270,8 +281,8 @@ impl<T: Send + 'static> CancellableTask<T> for TokioCancellableTask<T> {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let callback_wrapper = Box::new(move || {
-            let future = callback.work();
-            Box::new(future) as Box<dyn Future<Output = ()> + Send + Unpin>
+            let future = callback.run();
+            Box::pin(future) as Pin<Box<dyn Future<Output = ()> + Send>>
         });
         
         // Add the callback to the list

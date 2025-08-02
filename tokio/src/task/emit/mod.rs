@@ -10,14 +10,16 @@ pub mod collector;
 pub mod event;
 pub mod task;
 
-// Use the channel-based implementations
+// Use the task implementations
+pub use task::{TokioEmittingTask, TokioSenderTask, TokioReceiverTask};
+
+// Use the channel-based builders
 pub use channel_builder::{
-    TokioEmittingTask, 
     TokioEmittingTaskBuilder, 
     ChannelReceiverBuilder as TokioReceiverBuilder, 
     ChannelSenderBuilder as TokioSenderBuilder,
 };
-pub use collector::TokioEventCollector;
+pub use collector::{TokioEventCollector, StreamCollector};
 pub use event::{TokioEvent, TokioEventReceiver, TokioEventSender};
 
 use std::collections::HashMap;
@@ -63,19 +65,61 @@ where
     I: Clone + Send + Sync + 'static + TaskId,
 {
     /// Creates a new TokioFinalEvent.
+    /// 
+    /// # Panics
+    /// Panics if the collected_items map contains no successful results, as a FinalEvent
+    /// must represent at least some successful collection activity.
     pub fn new(
         summary_data: TSummary,
         collected_items: HashMap<Uuid, Result<CCollected, EItem>>, // Accepts map of Results
         task_id: I,
     ) -> Self {
+        let collected_items_count = collected_items.len();
+        Self::try_new(summary_data, collected_items, task_id)
+            .unwrap_or_else(|error_msg| {
+                // Provide comprehensive error context for debugging
+                tracing::error!(
+                    error = error_msg,
+                    task_id = ?task_id,
+                    collected_items_count = collected_items_count,
+                    "Failed to create TokioFinalEvent - no successful items found"
+                );
+                
+                // Since this method is documented to panic, we provide a clear panic message
+                // with additional context for debugging
+                panic!(
+                    "Cannot create TokioFinalEvent with no successful collected items: {}. \
+                     Task ID: {:?}, Total items: {}. \
+                     This indicates that all {} collected items resulted in errors.",
+                    error_msg,
+                    task_id,
+                    collected_items_count,
+                    collected_items_count
+                );
+            })
+    }
+
+    /// Creates a new TokioFinalEvent, returning an error if no successful items exist.
+    /// 
+    /// This is the non-panicking version of `new()` that returns a Result.
+    pub fn try_new(
+        summary_data: TSummary,
+        collected_items: HashMap<Uuid, Result<CCollected, EItem>>,
+        task_id: I,
+    ) -> Result<Self, &'static str> {
         // Extract successful items for caching
-        let successful_items = collected_items
+        let successful_items: HashMap<Uuid, CCollected> = collected_items
             .iter()
             .filter_map(|(k, v)| v.as_ref().ok().map(|c| (*k, c.clone())))
             .collect();
+        
+        // Validate that we have at least one successful item
+        if successful_items.is_empty() {
+            return Err("FinalEvent must have at least one successfully collected item");
+        }
             
         let task_uuid = Uuid::new_v4(); // Generate UUID for the task
-        Self {
+        Ok(Self {
             summary_data: summary_data.clone(),
             collected_items,
             successful_items,
@@ -83,7 +127,7 @@ where
             task_id,
             task_uuid,
             event_type: StreamingEventType::Final(summary_data),
-        }
+        })
     }
     
     /// Get only the successful items as a HashMap
@@ -175,11 +219,11 @@ where
     }
 }
 
-// Implementation of FinalEvent<T, C, C> for TokioFinalEvent<(), C, EItem, I>
+// Implementation of FinalEvent<T, C, C> for TokioFinalEvent<T, C, EItem, I>
 // This allows the type to work with EmittingTask<T, C, EItem, I>
 impl<T, C, EItem, I: TaskId>
     FinalEvent<T, C, C>
-    for TokioFinalEvent<(), C, EItem, I>
+    for TokioFinalEvent<T, C, EItem, I>
 where
     T: Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
@@ -200,9 +244,10 @@ where
     }
 }
 
-// Implementation of ReceiverEvent<T, C> for TokioFinalEvent<(), C, EItem, I>
-// This allows it to work with FinalEvent<T, C, C>
-impl<T, C, EItem, I> ReceiverEvent<T, C> for TokioFinalEvent<(), C, EItem, I>
+
+// Generic implementation of ReceiverEvent<T, C> for TokioFinalEvent<T, C, EItem, I>
+// This allows the type to work with any T, not just ()
+impl<T, C, EItem, I> ReceiverEvent<T, C> for TokioFinalEvent<T, C, EItem, I>
 where
     T: Send + Sync + 'static,
     C: Clone + Send + Sync + 'static,
@@ -218,16 +263,11 @@ where
     }
 
     fn data(&self) -> &T {
-        // We store () for summary data, but T is expected
-        // This is only safe when T = ()
-        // For other types, this would be unsound, but the API design
-        // ensures this is only called in contexts where T = ()
-        unsafe { std::mem::transmute(&self.summary_data) }
+        &self.summary_data
     }
 
     fn event_type(&self) -> &StreamingEventType<T> {
-        // Use Box::leak to create a 'static reference, avoiding Option mismatch by using unit type
-        Box::leak(Box::new(StreamingEventType::Final(())))
+        &self.event_type
     }
 
     fn is_final(&self) -> bool {
@@ -235,11 +275,19 @@ where
     }
 
     fn collector(&self) -> &C {
-        // ReceiverEvent expects &C but we have HashMap<Uuid, C>
-        // The API design seems flawed here - a collector should be
-        // a collection, not a single item
-        // For now, panic with a clear message
-        panic!("ReceiverEvent::collector() called on FinalEvent - API design mismatch")
+        // Return a reference to the first successful item as the collector
+        self.successful_items
+            .values()
+            .next()
+            .unwrap_or_else(|| {
+                tracing::error!(
+                    event_id = ?self.event_id,
+                    task_id = ?self.task_id,
+                    successful_items_len = self.successful_items.len(),
+                    "TokioFinalEvent collector() called with empty successful_items"
+                );
+                panic!("TokioFinalEvent::collector() architectural invariant violated")
+            })
     }
 }
 

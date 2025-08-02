@@ -2,14 +2,14 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use sweet_async_api::task::ContextualizedTask;
-use uuid::Uuid as UuidTaskId;
+use crate::task_id_uuid::UuidTaskId;
 use crate::task::task_relationships::{TaskRelationshipManager, TokioTaskRelationships};
 
 /// Default implementation of task context
 ///
 /// Provides automatic population of hostname, IP address, and current working directory
 /// for tasks that don't need custom implementations.
-/// Note: Reviewed as per TODOLIST.md file-specific task for task_context.rs - no blocking calls like 'block_on' are used; operations are lightweight and synchronous.
+/// All operations are lightweight and synchronous with no blocking calls.
 #[derive(Clone, Debug)]
 pub struct DefaultTaskContext {
     hostname: String,
@@ -72,6 +72,7 @@ impl Default for DefaultTaskContext {
 pub struct TaskWithDefaultContext<T: Clone + Send + Sync + 'static> {
     context: DefaultTaskContext,
     relationships: TokioTaskRelationships<T, UuidTaskId>,
+    runtime: crate::orchestra::runtime::TokioRuntime,
 }
 
 impl<T: Clone + Send + Sync + 'static> TaskWithDefaultContext<T> {
@@ -79,12 +80,13 @@ impl<T: Clone + Send + Sync + 'static> TaskWithDefaultContext<T> {
         Self {
             context: DefaultTaskContext::new(),
             relationships: TokioTaskRelationships::default(),
+            runtime: crate::orchestra::runtime::TokioRuntime::new(),
         }
     }
 }
 
 impl<T: Clone + Send + Sync + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
-    type RuntimeType = crate::runtime::TokioRuntime;
+    type RuntimeType = crate::orchestra::runtime::TokioRuntime;
     type RelationshipsType = TokioTaskRelationships<T, UuidTaskId>;
     
     fn relationships(&self) -> &Self::RelationshipsType {
@@ -96,7 +98,7 @@ impl<T: Clone + Send + Sync + 'static> ContextualizedTask<T, UuidTaskId> for Tas
     }
     
     fn runtime(&self) -> &Self::RuntimeType {
-        panic!("Runtime should be accessed through orchestrator")
+        &self.runtime
     }
     
     fn cwd(&self) -> PathBuf {

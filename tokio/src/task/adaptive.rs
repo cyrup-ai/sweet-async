@@ -75,13 +75,40 @@ enum ConcurrencyEngine {
 
 impl ConcurrencyEngine {
     /// Build a new Rayon engine with `threads` number of threads.
+    /// If Rayon thread pool creation fails completely, falls back to Tokio engine.
     fn new_rayon(threads: usize) -> Self {
-        let pool = rayon::ThreadPoolBuilder::new()
+        match rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
-            .build()
-            .expect("Failed to build Rayon ThreadPool");
-        ConcurrencyEngine::Rayon {
-            pool: Arc::new(pool),
+            .build() {
+            Ok(pool) => ConcurrencyEngine::Rayon {
+                pool: Arc::new(pool),
+            },
+            Err(e) => {
+                warn!("Failed to build Rayon ThreadPool with {} threads: {}, trying fallback", threads, e);
+                // Fallback to a default pool with fewer threads
+                match rayon::ThreadPoolBuilder::new()
+                    .num_threads(num_cpus::get().max(1))
+                    .build() {
+                    Ok(pool) => ConcurrencyEngine::Rayon {
+                        pool: Arc::new(pool),
+                    },
+                    Err(e2) => {
+                        // Final fallback: try single-threaded pool
+                        match rayon::ThreadPoolBuilder::new()
+                            .num_threads(1)
+                            .build() {
+                            Ok(pool) => ConcurrencyEngine::Rayon {
+                                pool: Arc::new(pool),
+                            },
+                            Err(e3) => {
+                                // If all Rayon pool creation fails, fall back to Tokio engine
+                                warn!("All Rayon thread pool creation attempts failed: {}, {}, {} - falling back to Tokio engine", e, e2, e3);
+                                ConcurrencyEngine::Tokio
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -343,7 +370,13 @@ where
             // then updates stats, possibly adapts concurrency, and sends outputs.
             let join_handle = tokio::spawn(async move {
                 // Wait for permit
-                let _permit = sema_cl.acquire_owned().await.unwrap();
+                let _permit = match sema_cl.acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        warn!("Failed to acquire semaphore permit, task may be shutting down");
+                        return (Vec::new(), Duration::ZERO); // Exit early if semaphore is closed
+                    }
+                };
 
                 let result_future = task.wait();
                 let outputs = match result_future.await {
@@ -492,11 +525,13 @@ where
 
             let join_handle: JoinHandle<Result<(Vec<Out>, Duration), tokio::task::JoinError>> =
                 tokio::spawn(async move {
-                    let _permit = permit_sema
-                        .acquire_owned()
-                        .await
-                        .map_err(|e| format!("Semaphore acquire error: {}", e))
-                        .expect("Semaphore closed unexpectedly");
+                    let _permit = match permit_sema.acquire_owned().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            warn!("Semaphore acquire failed in async stream: {}", e);
+                            return Ok((Vec::new(), start_time.elapsed()));
+                        }
+                    };
                     match chunk_processing_engine_task.wait().await {
                         Ok(outputs) => Ok((outputs, start_time.elapsed())),
                         Err(e) => {
@@ -611,16 +646,14 @@ where
     ReceiverStream::new(rx_out)
 }
 
-// =============== DSL Macros (optional) ===============
+// =============== DSL Macros (internal only) ===============
 
-#[macro_export]
 macro_rules! adaptix {
     ( $($body:tt)* ) => {
-        $crate::adaptix_parse!( $($body)* )
+        crate::adaptix_parse!( $($body)* )
     };
 }
 
-#[macro_export]
 macro_rules! adaptix_parse {
     (
         config {
@@ -629,14 +662,14 @@ macro_rules! adaptix_parse {
         items($items:expr),
         map $map_expr:tt
     ) => {{
-        let mut cfg = $crate::AdaptixConfig::default();
+        let mut cfg = crate::AdaptixConfig::default();
         $(
             cfg.$cfg_key = $cfg_val;
         )*
         fn local_map() -> impl Fn(&_) -> _ + Copy + Send + Sync + 'static {
-            $crate::adaptix_map! $map_expr
+            crate::adaptix_map! $map_expr
         }
-        $crate::build_adaptix_stream($crate::AdaptixDsl {
+        crate::build_adaptix_stream(crate::AdaptixDsl {
             config: cfg,
             items: $items,
             map_fn: local_map(),
@@ -644,7 +677,6 @@ macro_rules! adaptix_parse {
     }};
 }
 
-#[macro_export]
 macro_rules! adaptix_map {
     (|$val:ident| { $($body:tt)* }) => {
         move |$val| {

@@ -300,34 +300,7 @@ impl<T: Send + 'static> TracingTask<T> for TokioTracingTask {
         self.tracing_enabled.load(Ordering::Relaxed)
     }
 
-    fn trace_start(&self) {
-        self.log_start();
-    }
 
-    fn trace_completion(&self, duration_ms: u64) {
-        self.log_completion(duration_ms);
-    }
-
-    fn trace_error(&self, error: &str, duration_ms: Option<u64>) {
-        self.log_failure(error, duration_ms);
-    }
-
-    fn trace_event(&self, event: &str, metadata: Option<&str>) {
-        info!(
-            task_name = %self.task_name,
-            event = %event,
-            metadata = ?metadata,
-            "Task event"
-        );
-    }
-
-    fn add_trace_field(&mut self, key: String, value: String) {
-        self.fields.insert(key, value);
-    }
-
-    fn get_trace_fields(&self) -> std::collections::HashMap<String, String> {
-        self.fields.clone()
-    }
 }
 
 #[cfg(test)]

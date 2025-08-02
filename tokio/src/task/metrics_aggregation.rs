@@ -94,9 +94,17 @@ impl<I: TaskId> MetricsAggregator<I> {
         
         // Return a snapshot with aggregated metrics
         // This would need a "system" task ID in practice
+        let task_id = match self.metrics.keys().next().map(|(id, _)| id.clone()) {
+            Some(id) => id,
+            None => {
+                // Create a default/system task ID when no metrics exist
+                tracing::debug!("No metrics to aggregate, creating empty metrics snapshot");
+                I::default()
+            }
+        };
+        
         MetricsSnapshot {
-            task_id: self.metrics.keys().next().map(|(id, _)| id.clone())
-                .expect("No metrics to aggregate"),
+            task_id,
             hostname: "aggregated".to_string(),
             vector_clock: self.vector_clock.clone(),
             cpu_time_nanos: total_cpu,

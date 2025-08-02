@@ -9,16 +9,39 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 
 use sweet_async_api::task::RecoverableTask;
-use crate::task::task_error::{AsyncTaskError, RecoveryStrategy};
+use sweet_async_api::task::recoverable_task::RetryStrategy;
+use sweet_async_api::task::AsyncTaskError;
+use sweet_async_api::task::builder::AsyncWork;
+
+/// Backoff strategy for retry attempts
+#[derive(Debug, Clone)]
+pub enum BackoffStrategy {
+    /// Fixed delay between retries
+    Fixed(Duration),
+    /// Linear backoff with base interval
+    Linear(Duration),
+    /// Exponential backoff with base and max delay
+    Exponential { base: Duration, max_delay: Duration },
+}
+
+impl Default for BackoffStrategy {
+    fn default() -> Self {
+        Self::Exponential {
+            base: Duration::from_millis(100),
+            max_delay: Duration::from_secs(30),
+        }
+    }
+}
 
 /// Retry configuration
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
-    pub max_attempts: u32,
+    pub max_attempts: u8,
     pub base_delay_ms: u64,
     pub max_delay_ms: u64,
     pub backoff_multiplier: f64,
     pub jitter: bool,
+    pub strategy: BackoffStrategy,
 }
 
 impl Default for RetryConfig {
@@ -29,6 +52,7 @@ impl Default for RetryConfig {
             max_delay_ms: 30_000,
             backoff_multiplier: 2.0,
             jitter: true,
+            strategy: BackoffStrategy::default(),
         }
     }
 }
@@ -69,6 +93,7 @@ pub struct TokioRecoverableTask<T: Send + 'static> {
     success_count: Arc<AtomicU32>,
     circuit_state: Arc<std::sync::RwLock<CircuitState>>,
     last_failure_time: Arc<std::sync::RwLock<Option<std::time::Instant>>>,
+    fallback_work: crate::task::error_fallback::ErrorFallback<T>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -83,6 +108,7 @@ impl<T: Send + 'static> TokioRecoverableTask<T> {
             success_count: Arc::new(AtomicU32::new(0)),
             circuit_state: Arc::new(std::sync::RwLock::new(CircuitState::Closed)),
             last_failure_time: Arc::new(std::sync::RwLock::new(None)),
+            fallback_work: crate::task::error_fallback::ErrorFallback::new(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -101,18 +127,43 @@ impl<T: Send + 'static> TokioRecoverableTask<T> {
 
     /// Check if circuit breaker allows execution
     fn can_execute(&self) -> bool {
-        let state = *self.circuit_state.read().unwrap();
+        let state = match self.circuit_state.read() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                tracing::error!("Circuit breaker state lock poisoned, defaulting to closed");
+                *poisoned.into_inner()
+            }
+        };
+        
         match state {
             CircuitState::Closed => true,
             CircuitState::Open => {
                 // Check if timeout has elapsed
-                if let Some(last_failure) = *self.last_failure_time.read().unwrap() {
-                    let elapsed = last_failure.elapsed().as_millis() as u64;
+                let last_failure = match self.last_failure_time.read() {
+                    Ok(guard) => *guard,
+                    Err(poisoned) => {
+                        tracing::error!("Last failure time lock poisoned");
+                        *poisoned.into_inner()
+                    }
+                };
+                
+                if let Some(failure_time) = last_failure {
+                    let elapsed = failure_time.elapsed().as_millis() as u64;
                     if elapsed >= self.circuit_config.timeout_ms {
                         // Transition to half-open
-                        *self.circuit_state.write().unwrap() = CircuitState::HalfOpen;
-                        self.success_count.store(0, Ordering::SeqCst);
-                        true
+                        match self.circuit_state.write() {
+                            Ok(mut guard) => {
+                                *guard = CircuitState::HalfOpen;
+                                self.success_count.store(0, Ordering::SeqCst);
+                                true
+                            }
+                            Err(poisoned) => {
+                                tracing::error!("Circuit breaker state write lock poisoned");
+                                *poisoned.into_inner() = CircuitState::HalfOpen;
+                                self.success_count.store(0, Ordering::SeqCst);
+                                true
+                            }
+                        }
                     } else {
                         false
                     }
@@ -128,13 +179,30 @@ impl<T: Send + 'static> TokioRecoverableTask<T> {
     fn record_success(&self) {
         self.success_count.fetch_add(1, Ordering::SeqCst);
         
-        let state = *self.circuit_state.read().unwrap();
+        let state = match self.circuit_state.read() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                tracing::error!("Circuit breaker state lock poisoned in record_success");
+                *poisoned.into_inner()
+            }
+        };
+        
         if state == CircuitState::HalfOpen {
             let success_count = self.success_count.load(Ordering::SeqCst);
             if success_count >= self.circuit_config.success_threshold {
-                *self.circuit_state.write().unwrap() = CircuitState::Closed;
-                self.failure_count.store(0, Ordering::SeqCst);
-                debug!("Circuit breaker closed after {} successes", success_count);
+                match self.circuit_state.write() {
+                    Ok(mut guard) => {
+                        *guard = CircuitState::Closed;
+                        self.failure_count.store(0, Ordering::SeqCst);
+                        debug!("Circuit breaker closed after {} successes", success_count);
+                    }
+                    Err(poisoned) => {
+                        tracing::error!("Circuit breaker state write lock poisoned in record_success");
+                        *poisoned.into_inner() = CircuitState::Closed;
+                        self.failure_count.store(0, Ordering::SeqCst);
+                        debug!("Circuit breaker closed after {} successes (recovered from poison)", success_count);
+                    }
+                }
             }
         }
     }
@@ -142,12 +210,30 @@ impl<T: Send + 'static> TokioRecoverableTask<T> {
     /// Record execution failure
     fn record_failure(&self) {
         self.failure_count.fetch_add(1, Ordering::SeqCst);
-        *self.last_failure_time.write().unwrap() = Some(std::time::Instant::now());
+        
+        match self.last_failure_time.write() {
+            Ok(mut guard) => {
+                *guard = Some(std::time::Instant::now());
+            }
+            Err(poisoned) => {
+                tracing::error!("Last failure time write lock poisoned in record_failure");
+                *poisoned.into_inner() = Some(std::time::Instant::now());
+            }
+        }
         
         let failure_count = self.failure_count.load(Ordering::SeqCst);
         if failure_count >= self.circuit_config.failure_threshold {
-            *self.circuit_state.write().unwrap() = CircuitState::Open;
-            warn!("Circuit breaker opened after {} failures", failure_count);
+            match self.circuit_state.write() {
+                Ok(mut guard) => {
+                    *guard = CircuitState::Open;
+                    warn!("Circuit breaker opened after {} failures", failure_count);
+                }
+                Err(poisoned) => {
+                    tracing::error!("Circuit breaker state write lock poisoned in record_failure");
+                    *poisoned.into_inner() = CircuitState::Open;
+                    warn!("Circuit breaker opened after {} failures (recovered from poison)", failure_count);
+                }
+            }
         }
     }
 
@@ -176,98 +262,61 @@ impl<T: Send + 'static> Default for TokioRecoverableTask<T> {
     }
 }
 
-impl<T: Send + 'static> RecoverableTask<T> for TokioRecoverableTask<T> {
-    async fn retry<F, Fut>(&self, operation: F) -> Result<T, AsyncTaskError>
-    where
-        F: Fn() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, AsyncTaskError>> + Send + 'static,
-    {
-        let mut last_error = AsyncTaskError::failure("No attempts made");
-        
-        for attempt in 0..self.retry_config.max_attempts {
-            // Check circuit breaker
-            if !self.can_execute() {
-                return Err(AsyncTaskError::failure("Circuit breaker is open"));
-            }
-            
-            self.attempt_count.fetch_add(1, Ordering::SeqCst);
-            debug!("Retry attempt {} of {}", attempt + 1, self.retry_config.max_attempts);
-            
-            match operation().await {
-                Ok(result) => {
-                    self.record_success();
-                    debug!("Operation succeeded on attempt {}", attempt + 1);
-                    return Ok(result);
-                }
-                Err(error) => {
-                    last_error = error.clone();
-                    self.record_failure();
-                    
-                    // Check if error is retryable
-                    if !error.is_retryable() {
-                        warn!("Non-retryable error: {}", error);
-                        return Err(error);
-                    }
-                    
-                    // Don't delay on the last attempt
-                    if attempt < self.retry_config.max_attempts - 1 {
-                        let delay = self.calculate_delay(attempt);
-                        debug!("Waiting {:?} before retry attempt {}", delay, attempt + 2);
-                        sleep(delay).await;
-                    }
-                }
-            }
-        }
-        
-        warn!("All retry attempts exhausted");
-        Err(last_error)
-    }
+impl<T: Clone + Send + 'static> RecoverableTask<T> for TokioRecoverableTask<T> {
+    type FallbackWork = crate::task::error_fallback::ErrorFallback<T>;
 
-    async fn recover_with_fallback<F, Fut, FB, FutB>(
-        &self,
-        primary: F,
-        fallback: FB,
-    ) -> Result<T, AsyncTaskError>
-    where
-        F: Fn() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, AsyncTaskError>> + Send + 'static,
-        FB: Fn() -> FutB + Send + 'static,
-        FutB: Future<Output = Result<T, AsyncTaskError>> + Send + 'static,
-    {
-        // Try primary operation with retry
-        match self.retry(primary).await {
-            Ok(result) => Ok(result),
-            Err(primary_error) => {
-                warn!("Primary operation failed, trying fallback: {}", primary_error);
-                
-                // Try fallback operation
-                match fallback().await {
-                    Ok(result) => {
-                        debug!("Fallback operation succeeded");
-                        Ok(result)
-                    }
-                    Err(fallback_error) => {
-                        warn!("Fallback operation also failed: {}", fallback_error);
-                        Err(AsyncTaskError::failure(format!(
-                            "Both primary and fallback failed. Primary: {}. Fallback: {}",
-                            primary_error, fallback_error
-                        )))
-                    }
-                }
+    fn recover(&self, error: AsyncTaskError) -> impl Future<Output = Result<T, AsyncTaskError>> + Send {
+        let fallback_work = self.fallback_work().clone();
+        let can_recover = self.can_recover_from(&error);
+        let current_retry = self.current_retry();
+        let max_retries = self.max_retries();
+        
+        async move {
+            if can_recover && current_retry < max_retries {
+                // Use fallback work to generate a recovery value
+                return fallback_work.run().await;
             }
+            Err(error)
         }
     }
 
-    fn retry_count(&self) -> u32 {
-        self.attempt_count.load(Ordering::SeqCst)
+    fn can_recover_from(&self, error: &AsyncTaskError) -> bool {
+        // Recoverable from timeout, IO, and resource limit errors
+        matches!(error, 
+            AsyncTaskError::Timeout(_) | 
+            AsyncTaskError::Io(_) | 
+            AsyncTaskError::ResourceLimit(_)
+        )
     }
 
-    fn reset_retry_count(&self) {
-        self.attempt_count.store(0, Ordering::SeqCst);
-        self.failure_count.store(0, Ordering::SeqCst);
-        self.success_count.store(0, Ordering::SeqCst);
-        *self.circuit_state.write().unwrap() = CircuitState::Closed;
+    fn fallback_work(&self) -> &Self::FallbackWork {
+        &self.fallback_work
     }
+
+    fn max_retries(&self) -> u8 {
+        self.retry_config.max_attempts
+    }
+
+    fn current_retry(&self) -> u8 {
+        self.attempt_count.load(Ordering::SeqCst) as u8
+    }
+
+    fn retry_strategy(&self) -> RetryStrategy {
+        match self.retry_config.strategy {
+            BackoffStrategy::Fixed(duration) => RetryStrategy::Fixed(duration),
+            BackoffStrategy::Linear(base) => RetryStrategy::Linear { 
+                base, 
+                increment: Duration::from_millis(100) // Default increment of 100ms
+            },
+            BackoffStrategy::Exponential { base, max_delay } => RetryStrategy::Exponential { 
+                base, 
+                factor: 2.0, // Default factor of 2.0
+                max: max_delay 
+            },
+        }
+    }
+
+
 }
 
 #[cfg(test)]
@@ -286,7 +335,7 @@ mod tests {
             async move {
                 let count = counter.fetch_add(1, Ordering::SeqCst);
                 if count < 2 {
-                    Err(AsyncTaskError::failure("Temporary failure"))
+                    Err(AsyncTaskError::Failure("Temporary failure".to_string()))
                 } else {
                     Ok(42)
                 }
@@ -308,7 +357,7 @@ mod tests {
             });
         
         let result = task.retry(|| async {
-            Err(AsyncTaskError::failure("Always fails"))
+            Err(AsyncTaskError::Failure("Always fails".to_string()))
         }).await;
         
         assert!(result.is_err());

@@ -1,7 +1,11 @@
 pub mod builder;
-pub mod channel_orchestrator;
 pub mod orchestrator;
+pub mod runtime;
 
-pub use builder::{TokioOrchestratorBuilder, TokioAsyncTaskBuilder};
-pub use channel_orchestrator::ChannelOrchestrator;
+pub use builder::{TokioOrchestratorBuilder, TokioTaskBuilderWithOrchestrator};
 pub use orchestrator::TokioOrchestrator;
+pub use runtime::TokioRuntime;
+
+// Re-export API types
+pub use sweet_async_api::orchestra::OrchestratorError;
+

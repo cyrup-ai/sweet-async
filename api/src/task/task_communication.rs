@@ -1,7 +1,6 @@
-use std::fmt::Debug;
-use std::sync::Arc;
+use crate::task::{AsyncTaskError, TaskId, TaskStatus};
 use futures::channel::mpsc;
-use crate::task::{TaskId, TaskStatus, AsyncTaskError};
+use std::fmt::Debug;
 
 #[cfg(feature = "cryypt")]
 use cryypt_cipher::Cipher;
@@ -28,28 +27,28 @@ pub struct TaskEnvelope<T: Clone + Send + 'static, I: TaskId> {
 pub enum TaskMessage<T: Clone + Send + 'static> {
     /// Status update from a task
     StatusUpdate(TaskStatus),
-    
+
     /// Data payload between tasks
     Data(T),
-    
+
     /// Encrypted data payload (for when T needs to be encrypted)
     EncryptedData(Vec<u8>),
-    
+
     /// Request to cancel
     CancelRequest,
-    
+
     /// Acknowledgment of cancellation
     CancelAck,
-    
+
     /// Error occurred in task
     Error(AsyncTaskError),
-    
+
     /// Task completed successfully
     Completed,
-    
+
     /// Heartbeat/keepalive signal
     Heartbeat,
-    
+
     /// Custom message type for extensibility
     Custom(String, Vec<u8>),
 }
@@ -101,7 +100,6 @@ pub struct TaskSender<T: Clone + Send + 'static, I: TaskId> {
     pub cipher: Option<std::sync::Arc<Cipher>>,
 }
 
-
 /// Simple parent-child communication channels
 pub struct ParentChildChannels<T: Clone + Send + 'static> {
     /// Sender to communicate with parent task
@@ -124,5 +122,3 @@ impl<T: Clone + Send + 'static> Default for ParentChildChannels<T> {
         }
     }
 }
-
-

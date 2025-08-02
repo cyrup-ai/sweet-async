@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
-use crate::task::{TaskId, TaskStatus, AsyncTaskError};
 use crate::task::task_communication::TaskEnvelope;
+use crate::task::{AsyncTaskError, TaskId, TaskStatus};
 
 #[cfg(feature = "cryypt")]
 use cryypt_cipher::Cipher;
@@ -45,8 +43,6 @@ pub trait TaskMessageBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {
     /// Build a custom message
     fn custom(self, tag: impl Into<String>, data: Vec<u8>) -> TaskEnvelope<T, I>;
 
-    /// Build an encrypted data message
-    #[cfg(feature = "encryption")]
     fn encrypted_data(self, data: Vec<u8>) -> TaskEnvelope<T, I>;
 }
 
@@ -54,7 +50,7 @@ pub trait TaskMessageBuilder<T: Clone + Send + 'static, I: TaskId>: Sized {
 pub trait MessageBuilderExt<T: Clone + Send + 'static>: TaskId + Clone {
     /// The type of message builder to create
     type Builder: TaskMessageBuilder<T, Self>;
-    
+
     /// Create a message builder for this task ID
     fn message(&self) -> Self::Builder;
 }

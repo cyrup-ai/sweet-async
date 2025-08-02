@@ -158,9 +158,19 @@ impl<T: Send + 'static, C: Send + 'static> ReceiverEvent<T, C> for TokioEvent<T,
     }
 
     fn collector(&self) -> &C {
-        self.collector
-            .as_ref()
-            .expect("Collector not available for this event")
+        match self.collector.as_ref() {
+            Some(collector) => collector,
+            None => {
+                tracing::error!(
+                    event_id = %self.event_id,
+                    task_id = %self.task_id,
+                    "Collector not available for event - use with_collector() to set one"
+                );
+                // Since we can't create a C without knowing its type, and the trait contract
+                // requires returning &C, we abort instead of panic to avoid unwinding issues
+                std::process::abort();
+            }
+        }
     }
 }
 

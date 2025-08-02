@@ -23,7 +23,7 @@ You can write sync code and it's still run asynchronously. You can drop the empt
 let mistral_llm = AsyncTask::to::<LLM>({
     hf_hub::download_model("mistral-7b")
 }).await_result(|result| {
-    OK(result) => result, 
+    OK(result) => result,
     ERR(e) => CustomError::from(e)
 });
 ```
@@ -42,7 +42,7 @@ let mistral_llm = AsyncTask::to::<LLM>()
         // run arbitrary code here executed in a Future
         hf_hub::download_model("mistral-7b").await
     }, |result| {
-        OK(result) => result, 
+        OK(result) => result,
         ERR(e) => Err(e)
     });
 ```
@@ -53,8 +53,9 @@ let mistral_llm = AsyncTask::to::<LLM>()
 // Dependencies first, configuration next, work logic last
 let csv_records = AsyncTask::emits::<CsvRecord>()
     .with(schema_config)        // Pass dependencies using with()
-    .with(processing_stats)       
-    .with_timeout(60.seconds())           // Configuration next
+    .with(processing_stats)
+    .with_timeout(60.seconds())
+    .sender(|collector| {        // Configuration next
         collector.of_file("data.csv")
             .with_delimiter(Delimiter::NewLine)
             .into_chunks(100.rows());
@@ -80,16 +81,16 @@ let processed_data = AsyncTask::emits::<ProcessedItem>()
         // Auto-chunk large collections to prevent memory issues
         collector.of(million_item_vec)
             .into_chunks(500.items());
-        
+
         // Stream from database without loading into memory
         collector.from_database(db_conn, "SELECT * FROM large_table")
             .into_chunks(1000.rows());
-        
+
         // Process files line by line with custom delimiters
         collector.of_file("huge_file.jsonl")
             .with_delimiter(Delimiter::NewLine)
             .into_chunks(250.lines());
-        
+
         // Concurrent API calls with batching
         collector.from_api_batch(api_urls)
             .into_chunks(50.requests());
@@ -154,7 +155,7 @@ let batch_results = AsyncTask::emits::<ApiResult>()
             POST https://api.example.com/enrich
             Authorization: Bearer {{token}}
             Content-Type: application/json
-            
+
             {
                 "user_id": {{user_id}},
                 "include_profile": true
@@ -163,7 +164,7 @@ let batch_results = AsyncTask::emits::<ApiResult>()
             ("token", auth_token),
             ("user_id", user_id.to_string())
         ]).await;
-        
+
         collector.collect(user_id, response);
     });
 ```
@@ -261,14 +262,14 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_date_range(last_month)
         .order_by(TaskOrder::Priority.desc())
         .into_chunks(1000.tasks());
-    
+
     // SLACK EMOJI REACTIONS (for team sentiment analysis)
     collector.of_slack_messages(credentials)
         .acting_as("david@cyrup.ai")
         .with_channel("general")
         .containing(["sick", "pto", "late"].any())
         .into_chunks(500.reactions());
-    
+
     // LINKEDIN FLEXES (for cringe detection)
     collector.of_linkedin_posts(credentials)
         //.with_keyterm("hiring").stemmed().expanded())
@@ -276,7 +277,7 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_posted_date(DateRange::LastMonth)
         .ordered_by(PostOrder::Relevance.desc())
         .into_chunks(20.posts());
-    
+
     // MEETING CALENDAR (for existential dread measurement)
     collector.of_calendar_events(CalendarProvider::Google)
         .with_credentials(credentials)
@@ -284,7 +285,7 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_event_type(EventType::Meeting)
         .with_date_range(DateRange::Tomorrow)
         .ordered_by(EventOrder::StartTime.asc())
-        .into_chunks(50.meetings()); 
+        .into_chunks(50.meetings());
 })
 ```
 
@@ -300,8 +301,8 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .in_time_range(TimeRange::LastHour)
         .ordered_by(ResultOrder::Influence.desc())
         .into_chunks(100.tweets());
-    
-    // DISCORD CHAOS 
+
+    // DISCORD CHAOS
     collector.of_discord(credentials)
         .with_server("792347892349234")
         .with_generation(
@@ -324,22 +325,22 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
     collector.from_database(postgres_conn, "SELECT * FROM huge_table")
         .with_cursor_size(1000)
         .into_chunks(1000.rows());
-    
+
     // SURREALDB
     collector.from_surrealdb(surreal_conn, "SELECT * FROM records")
         .with_live_query(true)
         .into_chunks(500.records());
-    
+
     // SEAORM
     collector.from_seaorm(sea_query)
         .with_batch_size(2000)
         .into_chunks(2000.entities());
-    
+
     // SQLITE
     collector.from_sqlite(sqlite_conn, "SELECT * FROM logs ORDER BY timestamp")
         .with_streaming(true)
         .into_chunks(5000.rows());
-    
+
     // MYSQL
     collector.from_mysql(mysql_conn, "SELECT * FROM events")
         .into_chunks(1500.rows());
@@ -356,17 +357,17 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_retry(3.attempts())
         .with_timeout(30.seconds())
         .into_chunks(25.responses());
-    
+
     // WEBSOCKET STREAMS
     collector.from_websocket("wss://api.example.com/stream")
         .with_auth(bearer_token)
         .into_chunks(100.messages());
-    
+
     // SSE STREAMS
     collector.from_sse("https://api.example.com/events")
         .with_headers(custom_headers)
         .into_chunks(50.events());
-    
+
     // GRAPHQL SUBSCRIPTIONS
     collector.from_graphql_subscription(graphql_client, subscription_query)
         .into_chunks(25.updates());
@@ -382,12 +383,12 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_region(Region::UsEast1)
         .with_credentials(aws_creds)
         .into_chunks(50.objects());
-    
+
     // GOOGLE CLOUD STORAGE
     collector.from_gcs(bucket, "logs/**/*.json")
         .with_service_account(gcp_creds)
         .into_chunks(25.objects());
-    
+
     // AZURE BLOB STORAGE
     collector.from_azure_blob(container, "*.parquet")
         .with_connection_string(azure_conn)
@@ -404,12 +405,12 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_auth(github_token)
         .with_branch("main")
         .into_chunks(10.files());
-    
+
     // GITLAB
     collector.from_gitlab("group/project", "configs/*.yaml")
         .with_token(gitlab_token)
         .into_chunks(20.files());
-    
+
     // GIT REPOSITORIES
     collector.from_git_repo("https://github.com/owner/repo.git")
         .with_path("data/**/*.csv")
@@ -428,17 +429,17 @@ let resilient_processing = AsyncTask::emits::<ProcessedItem>()
         .with_offset(Offset::Latest)
         .with_partition_strategy(PartitionStrategy::RoundRobin)
         .into_chunks(100.messages());
-    
+
     // REDIS STREAMS
     collector.from_redis_stream(redis_conn, "events:*")
         .with_consumer_group("workers")
         .into_chunks(50.entries());
-    
+
     // RABBITMQ
     collector.from_rabbitmq(amqp_conn, "task_queue")
         .with_prefetch(100)
         .into_chunks(25.messages());
-    
+
     // NATS
     collector.from_nats(nats_conn, "events.>")
         .with_queue_group("processors")

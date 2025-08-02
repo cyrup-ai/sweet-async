@@ -1,23 +1,20 @@
 pub mod orchestra;
-pub mod runtime;
 pub mod task;
 pub mod task_id_uuid;
 
+#[cfg(test)]
+mod validation_test;
+
 
 // Re-export core components
-pub use orchestra::{TokioOrchestratorBuilder, TokioOrchestrator};
-pub use runtime::TokioRuntime;
-pub use runtime::safe_blocking;
+pub use orchestra::TokioOrchestratorBuilder;
+pub use orchestra::runtime::TokioRuntime;
 pub use task::{TokioAsyncTask, TokioEmittingTask, TokioSenderTask, TokioReceiverTask, TokioFinalEvent};
 pub use task::builder::TokioAsyncTaskBuilder;
 pub use task_id_uuid::*;
 
-/// Create a new Tokio runtime using the current handle
-pub fn new_runtime() -> TokioRuntime {
-    TokioRuntime::new()
-}
+// Re-export extension traits from our task module for user convenience
+pub use task::{DurationExt, RowsExt, ChunkSize, Delimiter};
 
-/// Create a new Tokio runtime with custom configuration
-pub fn new_runtime_with_config(workers: usize) -> TokioRuntime {
-    TokioRuntime::with_config(workers)
-}
+// Type alias to enable README.md syntax: AsyncTask::to::<T>() and AsyncTask::emits::<T>()
+pub type AsyncTask<T, I = UuidTaskId> = TokioAsyncTask<T, I>;

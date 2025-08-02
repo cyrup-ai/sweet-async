@@ -67,131 +67,135 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
 
     /// Get all collected items
     fn collected(&self) -> &Collection;
-    
+
     // Collection sources
     fn of<I>(&mut self, items: I) -> &mut Self
     where
         I: IntoIterator<Item = T> + Send + 'static;
-    
+
     fn of_file(&mut self, path: impl AsRef<Path>) -> &mut Self;
-    
+
     // Database sources
     fn from_database<P>(&mut self, pool: P, query: &str) -> &mut Self
     where
         P: Send + 'static;
-    
-    #[cfg(feature = "sqlx")]
+
     fn from_postgres<P>(&mut self, pool: P, query: &str) -> &mut Self
     where
-        P: sqlx::PgPool + Send + 'static;
-    
+        P: Clone + Send + 'static;
+
     fn from_surrealdb<DB>(&mut self, db: DB, query: &str) -> &mut Self
     where
         DB: Send + 'static;
-    
+
     fn from_seaorm<Q>(&mut self, query: Q) -> &mut Self
     where
         Q: Send + 'static;
-    
+
     fn from_sqlite<DB>(&mut self, connection: DB, query: &str) -> &mut Self
     where
         DB: Send + 'static;
-    
+
     fn from_mysql<DB>(&mut self, connection: DB, query: &str) -> &mut Self
     where
         DB: Send + 'static;
-    
+
     // API & Network sources
     fn from_api_batch<U>(&mut self, urls: Vec<U>) -> &mut Self
     where
         U: Send + 'static;
-    
+
     fn from_websocket(&mut self, url: &str) -> &mut Self;
-    
+
     fn from_sse(&mut self, url: &str) -> &mut Self;
-    
+
     fn from_graphql_subscription<G, Q>(&mut self, client: G, query: Q) -> &mut Self
     where
         G: Send + 'static,
         Q: Send + 'static;
-    
+
     // Cloud Storage
     fn from_s3<Client>(&mut self, client: Client, bucket: &str, pattern: &str) -> &mut Self
     where
         Client: Send + 'static;
-    
+
     fn from_gcs<Client>(&mut self, client: Client, bucket: &str, pattern: &str) -> &mut Self
     where
         Client: Send + 'static;
-    
-    fn from_azure_blob<Client>(&mut self, client: Client, container: &str, pattern: &str) -> &mut Self
+
+    fn from_azure_blob<Client>(
+        &mut self,
+        client: Client,
+        container: &str,
+        pattern: &str,
+    ) -> &mut Self
     where
         Client: Send + 'static;
-    
+
     // Version Control
     fn from_github(&mut self, repo: &str, pattern: &str) -> &mut Self;
-    
+
     fn from_gitlab(&mut self, project: &str, pattern: &str) -> &mut Self;
-    
+
     fn from_git_repo(&mut self, url: &str) -> &mut Self;
-    
+
     // Message Queues & Streaming
     fn from_kafka_topic<Consumer>(&mut self, consumer: Consumer, topic: &str) -> &mut Self
     where
         Consumer: Send + 'static;
-    
+
     fn from_redis_stream<R>(&mut self, conn: R, pattern: &str) -> &mut Self
     where
         R: Send + 'static;
-    
+
     fn from_rabbitmq<A>(&mut self, conn: A, queue: &str) -> &mut Self
     where
         A: Send + 'static;
-    
+
     fn from_nats<N>(&mut self, conn: N, subject: &str) -> &mut Self
     where
         N: Send + 'static;
-    
+
     // Social Media & Communication
     fn from_twitter_stream(&mut self, account: &str) -> &mut Self;
-    
+
     fn from_discord_server<Token>(&mut self, token: Token, server_id: &str) -> &mut Self
     where
         Token: Send + 'static;
-    
+
     fn from_tiktok_feed<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     fn from_facebook_feed<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     // Browser & History sources
     fn from_browser_history(&mut self, browser_type: impl Send + 'static) -> &mut Self;
-    
+
     // IoT & Smart Devices
     fn from_smart_fridge<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     fn from_roomba<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     fn from_alexa_voice_history<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     fn from_tesla_api<Token>(&mut self, token: Token) -> &mut Self
     where
         Token: Send + 'static;
-    
+
     // Financial & Shopping
     fn from_bank_transactions<A>(&mut self, api: A) -> &mut Self
     where
         A: Send + 'static;
-    
+
     // Configuration methods
     fn with_delimiter(&mut self, delimiter: impl Send + 'static) -> &mut Self;
     fn with_batch_size(&mut self, size: usize) -> &mut Self;
@@ -216,7 +220,7 @@ pub trait Collector<T, C, Collection = HashMap<Uuid, C>>: Send + 'static {
     fn with_streaming(&mut self, enabled: bool) -> &mut Self;
     fn with_cursor_size(&mut self, size: usize) -> &mut Self;
     fn with_live_query(&mut self, enabled: bool) -> &mut Self;
-    
+
     // Finalization methods
     fn into_chunks(&mut self, size: usize) -> &mut Self;
 }

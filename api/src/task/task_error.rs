@@ -31,6 +31,9 @@ pub enum AsyncTaskError {
     #[error("Key version too old, minimum required: {0}")]
     KeyVersionTooOld(u8),
     
+    #[error("Recovery failed: {0}")]
+    RecoveryFailed(String),
+    
     #[error("IO error: {0}")]
     Io(String),
 

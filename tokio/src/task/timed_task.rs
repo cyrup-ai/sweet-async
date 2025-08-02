@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 use sweet_async_api::task::TimedTask;
-use crate::task::task_error::AsyncTaskError;
+use sweet_async_api::task::AsyncTaskError;
 
 /// Tokio-specific timed task implementation
 #[derive(Debug)]
@@ -103,7 +103,7 @@ impl TokioTimedTask {
             let now = SystemTime::now();
             if now >= deadline {
                 self.mark_completed();
-                return Err(AsyncTaskError::timeout(0));
+                return Err(AsyncTaskError::Timeout(Duration::from_millis(0)));
             }
             
             let time_left = deadline.duration_since(now).unwrap_or(Duration::ZERO);
@@ -112,7 +112,7 @@ impl TokioTimedTask {
                 Ok(result) => result,
                 Err(_) => {
                     self.mark_completed();
-                    return Err(AsyncTaskError::timeout(effective_timeout.as_millis() as u64));
+                    return Err(AsyncTaskError::Timeout(effective_timeout));
                 }
             }
         } else {
@@ -120,7 +120,7 @@ impl TokioTimedTask {
                 Ok(result) => result,
                 Err(_) => {
                     self.mark_completed();
-                    return Err(AsyncTaskError::timeout(self.timeout_duration.as_millis() as u64));
+                    return Err(AsyncTaskError::Timeout(self.timeout_duration));
                 }
             }
         };
@@ -159,41 +159,7 @@ impl<T: Send + 'static> TimedTask<T> for TokioTimedTask {
         self.timeout_duration
     }
 
-    fn set_timeout(&mut self, duration: Duration) {
-        self.timeout_duration = duration;
-    }
 
-    fn set_deadline(&mut self, deadline: SystemTime) {
-        self.deadline = Some(deadline);
-    }
-
-    fn deadline(&self) -> Option<SystemTime> {
-        self.deadline
-    }
-
-    fn elapsed(&self) -> Option<Duration> {
-        self.start_time.map(|start| start.elapsed())
-    }
-
-    fn remaining(&self) -> Option<Duration> {
-        if let Some(start) = self.start_time {
-            let elapsed = start.elapsed();
-            return Some(self.timeout_duration.saturating_sub(elapsed));
-        }
-        
-        if let Some(deadline) = self.deadline {
-            let now = SystemTime::now();
-            if let Ok(remaining) = deadline.duration_since(now) {
-                return Some(remaining);
-            }
-        }
-        
-        Some(self.timeout_duration)
-    }
-
-    fn is_expired(&self) -> bool {
-        self.is_timed_out()
-    }
 }
 
 #[cfg(test)]

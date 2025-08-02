@@ -16,8 +16,8 @@ use tokio::sync::Mutex;
 use sweet_async_api::orchestra::orchestrator::{OrchestratorError, TaskOrchestrator};
 use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, TaskId, TaskStatus, StatusEnabledTask};
 
-use crate::runtime::TokioRuntime;
-use crate::task::tokio_task::{TaskMetrics, TokioTask};
+use crate::orchestra::runtime::TokioRuntime;
+use crate::task::tokio_task::TokioTask;
 
 /// Basic, thread-safe orchestrator for Tokio tasks.
 pub struct TokioOrchestrator<T, I>
@@ -182,7 +182,10 @@ where
             
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orchestrator = this.clone();
-                async move { (id, orchestrator.start_task(&id).await) }
+                async move { 
+                    let result: Result<T, AsyncTaskError> = orchestrator.start_task(&id).await;
+                    (id, result)
+                }
             }))
             .await
         })
@@ -248,7 +251,10 @@ where
             
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orch = this.clone();
-                async move { (id, orch.start_task(&id).await) }
+                async move { 
+                    let result: Result<T, AsyncTaskError> = orch.start_task(&id).await;
+                    (id, result)
+                }
             }))
             .await
         })

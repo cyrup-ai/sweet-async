@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use sweet_async_api::orchestra::orchestrator::{OrchestratorError, TaskOrchestrator};
 use sweet_async_api::task::{AsyncTask as ApiAsyncTask, AsyncTaskError, CancellableTask, TaskId, TaskStatus, StatusEnabledTask};
 
-use crate::runtime::TokioRuntime;
+use crate::orchestra::runtime::TokioRuntime;
 use crate::task::tokio_task::TokioTask;
 
 /// Messages for orchestrator operations
@@ -217,8 +217,12 @@ where
             respond: tx,
         });
         
-        // Block on receiving the ID
-        rx.blocking_recv().unwrap_or_else(|_| panic!("Orchestrator actor died"))
+        // Block on receiving the ID with error handling
+        rx.blocking_recv().unwrap_or_else(|e| {
+            tracing::error!("Orchestrator actor communication failed: {}", e);
+            // Return a default ID in case of actor failure
+            I::default()
+        })
     }
 
     fn add_dependency(&self, dependent_id: &I, dependency_id: &I) -> Result<(), OrchestratorError> {

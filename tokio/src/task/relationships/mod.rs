@@ -1,8 +1,10 @@
+use std::fmt;
 use std::marker::PhantomData;
-use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::sync::mpsc::{self, Sender, Receiver};
 use sweet_async_api::task::{TaskId, TaskRelationships};
 
 /// Tokio implementation of TaskRelationships trait
+#[derive(Debug)]
 pub struct TokioTaskRelationships<T: Clone + Send + 'static, I: TaskId> {
     /// Parent sender channel
     parent_sender: Option<Sender<T>>,
@@ -18,6 +20,38 @@ pub struct TokioTaskRelationships<T: Clone + Send + 'static, I: TaskId> {
     
     /// Type marker
     _marker: PhantomData<(T, I)>,
+}
+
+impl<T: Clone + Send + 'static, I: TaskId> Clone for TokioTaskRelationships<T, I> {
+    fn clone(&self) -> Self {
+        // Create new channels for the clone since we can't clone the existing ones
+        let (parent_sender, parent_receiver) = match &self.parent_sender {
+            Some(_) => {
+                let (s, r) = mpsc::channel(32); // Using a default buffer size of 32
+                (Some(s), Some(r))
+            }
+            None => (None, None),
+        };
+
+        // Create new channels for each child
+        let child_channels: Vec<(Sender<T>, Receiver<T>)> = (0..self.child_senders.len())
+            .map(|_| mpsc::channel(32)) // Using a default buffer size of 32
+            .collect();
+
+        let (child_senders, child_receivers) = if !child_channels.is_empty() {
+            child_channels.into_iter().unzip()
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
+        Self {
+            parent_sender,
+            parent_receiver,
+            child_senders,
+            child_receivers,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<T: Clone + Send + 'static, I: TaskId> Default for TokioTaskRelationships<T, I> {
@@ -39,7 +73,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioTaskRelationships<T, I> {
     }
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> TaskRelationships<T, I> for TokioTaskRelationships<T, I> {
+impl<T: Clone + Send + Sync + 'static, I: TaskId> TaskRelationships<T, I> for TokioTaskRelationships<T, I> {
     type ParentSender = Sender<T>;
     type ParentReceiver = Receiver<T>;
     type ChildSender = Sender<T>;

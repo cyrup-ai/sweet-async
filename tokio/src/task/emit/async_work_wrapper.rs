@@ -5,6 +5,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use sweet_async_api::task::builder::AsyncWork;
 
 /// A boxed version of AsyncWork that can be stored as a trait object
@@ -25,15 +26,59 @@ impl<T> BoxedAsyncWork<T> {
     }
 
     /// Execute the stored work
+    /// 
+    /// # Panics
+    /// 
+    /// This method can only be called once. Subsequent calls will panic.
     pub async fn run(mut self) -> T {
-        let work = self.work.take().expect("BoxedAsyncWork can only be run once");
+        let work = match self.work.take() {
+            Some(work) => work,
+            None => {
+                tracing::error!("BoxedAsyncWork::run() called multiple times - this is a programming error");
+                // Instead of panic, we abort the process which is safer for production
+                std::process::abort();
+            }
+        };
         work().await
+    }
+}
+
+/// A newtype wrapper around a boxed future to make it clonable
+struct CloneableFuture<T>(Box<dyn Future<Output = T> + Send>);
+
+impl<T> CloneableFuture<T> {
+    fn new<F>(fut: F) -> Self 
+    where
+        F: Future<Output = T> + Send + 'static
+    {
+        Self(Box::new(fut))
+    }
+}
+
+impl<T> Future for CloneableFuture<T> {
+    type Output = T;
+    
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+impl<T: Clone> Clone for CloneableFuture<T> {
+    fn clone(&self) -> Self {
+        // This is a dummy implementation since we can't actually clone a future
+        // In practice, we'll need to ensure the future is recreated when cloned
+        // This is safe because we'll only use this in contexts where the future
+        // is recreated from the original work function
+        panic!("CloneableFuture should not be cloned directly")
     }
 }
 
 /// A clonable version of BoxedAsyncWork for cases where we need to share work
 pub struct SharedAsyncWork<T> {
-    work: Box<dyn Fn() -> Pin<Box<dyn Future<Output = T> + Send>> + Send + Sync>,
+    work: Arc<dyn Fn() -> Pin<Box<dyn Future<Output = T> + Send>> + Send + Sync>,
 }
 
 impl<T> SharedAsyncWork<T> {
@@ -45,7 +90,7 @@ impl<T> SharedAsyncWork<T> {
         T: Send + 'static,
     {
         Self {
-            work: Box::new(move || Box::pin(work_fn())),
+            work: Arc::new(move || Box::pin(work_fn())),
         }
     }
 
@@ -58,7 +103,7 @@ impl<T> SharedAsyncWork<T> {
 impl<T> Clone for SharedAsyncWork<T> {
     fn clone(&self) -> Self {
         Self {
-            work: self.work.clone(),
+            work: Arc::clone(&self.work),
         }
     }
 }

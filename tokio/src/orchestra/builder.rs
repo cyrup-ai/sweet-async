@@ -6,7 +6,8 @@
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use sweet_async_api::orchestra::{OrchestratorBuilder, TaskOrchestrator};
+use sweet_async_api::orchestra::{OrchestratorBuilder};
+use sweet_async_api::orchestra::orchestrator::TaskOrchestrator;
 use sweet_async_api::task::builder::AsyncTaskBuilder;
 use sweet_async_api::task::{AsyncTask, TaskId};
 
@@ -36,6 +37,15 @@ pub struct TokioOrchestratorBuilder<
     /// Builder type (task or emitting task)
     builder_type: BuilderType,
     
+    /// Task timeout duration
+    timeout_duration: Option<Duration>,
+    
+    /// Number of retry attempts
+    retry_attempts: u8,
+    
+    /// Whether tracing is enabled
+    tracing_enabled: bool,
+    
     /// Type markers
     _phantom: PhantomData<(T, Task, I)>,
 }
@@ -52,18 +62,35 @@ enum BuilderType {
 impl<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>
     TokioOrchestratorBuilder<T, Task, I>
 {
-    /// Create a new orchestrator builder for regular tasks
-    pub fn new_for_task() -> Self {
+    /// Create a new orchestrator builder (defaults to regular task)
+    pub fn new() -> Self {
         Self {
             builder_type: BuilderType::Task,
+            timeout_duration: None,
+            retry_attempts: 0,
+            tracing_enabled: false,
             _phantom: PhantomData,
         }
     }
     
-    /// Create a new orchestrator builder for emitting tasks
-    pub fn new_for_emitting_task() -> Self {
+    /// Create a new orchestrator builder for regular tasks (internal)
+    fn new_for_task() -> Self {
+        Self {
+            builder_type: BuilderType::Task,
+            timeout_duration: None,
+            retry_attempts: 0,
+            tracing_enabled: false,
+            _phantom: PhantomData,
+        }
+    }
+    
+    /// Create a new orchestrator builder for emitting tasks (internal)
+    fn new_for_emitting_task() -> Self {
         Self {
             builder_type: BuilderType::EmittingTask,
+            timeout_duration: None,
+            retry_attempts: 0,
+            tracing_enabled: false,
             _phantom: PhantomData,
         }
     }
@@ -92,6 +119,32 @@ impl<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>
     }
 }
 
+// Polymorphic implementation: AsyncTaskBuilder methods for default path
+impl<T: Clone + Send + 'static, Task: AsyncTask<T, I>, I: TaskId>
+    AsyncTaskBuilder for TokioOrchestratorBuilder<T, Task, I>
+{
+    fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout_duration = Some(duration);
+        self
+    }
+    
+    fn retry(mut self, attempts: u8) -> Self {
+        self.retry_attempts = attempts;
+        self
+    }
+    
+    fn tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
+        self
+    }
+    
+    fn new() -> Self {
+        Self::new()
+    }
+}
+
+
+
 /// Tokio task builder with orchestrator configured
 ///
 /// This struct provides the fluent builder interface for configuring async tasks
@@ -114,8 +167,8 @@ pub struct TokioTaskBuilderWithOrchestrator<T: Clone + Send + 'static, I: TaskId
 }
 
 impl<T: Clone + Send + 'static, I: TaskId> TokioTaskBuilderWithOrchestrator<T, I> {
-    /// Create a new task builder with orchestrator (regular task)
-    pub fn new_with_orchestrator<Task: AsyncTask<T, I>, O: TaskOrchestrator<T, Task, I>>(
+    /// Create a new task builder with orchestrator (internal)
+    pub(crate) fn new_with_orchestrator<Task: AsyncTask<T, I>, O: TaskOrchestrator<T, Task, I>>(
         _orchestrator: &O,
     ) -> Self {
         Self {
@@ -127,8 +180,8 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioTaskBuilderWithOrchestrator<T, I
         }
     }
     
-    /// Create a new emitting task builder with orchestrator
-    pub fn new_emitting_with_orchestrator<Task: AsyncTask<T, I>, O: TaskOrchestrator<T, Task, I>>(
+    /// Create a new emitting task builder with orchestrator (internal)
+    pub(crate) fn new_emitting_with_orchestrator<Task: AsyncTask<T, I>, O: TaskOrchestrator<T, Task, I>>(
         _orchestrator: &O,
     ) -> Self {
         Self {

@@ -9,4 +9,5 @@ pub mod fallback_value;
 pub mod process_stream;
 pub mod register_task;
 pub mod resolves_to;
+pub mod result_handler;
 pub mod spawn_task;

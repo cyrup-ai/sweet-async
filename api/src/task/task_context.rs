@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use crate::orchestra::runtime::Runtime;
-use crate::task::ParentChildChannels;
 
 /// Task that has execution context information
 ///
@@ -12,7 +11,7 @@ use crate::task::ParentChildChannels;
 pub trait ContextualizedTask<T: Clone + Send + 'static, I: crate::task::TaskId> {
     type RuntimeType: Runtime<T, I>;
     type RelationshipsType;
-    
+
     /// Get communication handles for this task's relationships
     ///
     /// Returns handles for communicating with parent and child tasks

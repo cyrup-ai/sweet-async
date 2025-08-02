@@ -9,13 +9,21 @@ pub struct ErrorFallback<T> {
     _phantom: std::marker::PhantomData<T>,
 }
 
+impl<T> ErrorFallback<T> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 impl<T: Clone + Send + 'static> AsyncWork<Result<T, AsyncTaskError>> for ErrorFallback<T> {
-    fn run(self) -> Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send + 'static>> {
-        Box::pin(async move {
+    fn run(self) -> impl Future<Output = Result<T, AsyncTaskError>> + Send + 'static {
+        async move {
             Err(AsyncTaskError::Failure(
                 "Task failed with no recovery".to_string(),
             ))
-        })
+        }
     }
 }
 
