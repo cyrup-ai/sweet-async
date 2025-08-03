@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Process CSV using the exact README syntax with zero-allocation design
     let csv_records = AsyncTask::emits::<CsvRecord>()
         .sender(|collector| {
-            collector.of_file("data.csv")
+            collector.of("data.csv")
                 .with_delimiter(Delimiter::NewLine)
                 .into_chunks(100.rows());
         })

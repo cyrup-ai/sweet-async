@@ -42,6 +42,8 @@ dashmap = "6.1.0"
 cryypt_cipher = { optional = true, path = "../../cryypt/cipher"}
 cryypt_key = { optional = true, path = "../../cryypt/key"}
 cryypt_quic = { optional = true, path = "../../cryypt/quic"}
+# SurrealDB dependencies - conditional on feature gates
+surrealdb = { version = "2.1", optional = true, default-features = false }
 
 [features]
 default = []
@@ -53,6 +55,10 @@ metrics = []
 distributed = []
 # Enable zero-knowledge proof support
 zk = []
+# Enable SurrealDB WebSocket streaming support
+surrealdb-ws = ["surrealdb/protocol-ws", "surrealdb/protocol-http"]
+# Enable SurrealDB local KV storage support  
+surrealdb-kv = ["surrealdb/kv-surrealkv"]
 
 [dev-dependencies]
 tokio-test = "0.4"

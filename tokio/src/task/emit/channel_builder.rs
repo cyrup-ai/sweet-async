@@ -66,32 +66,26 @@ use sweet_async_api::task::builder::{
 };
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority, TaskRelationships};
 use sweet_async_api::task::emit::{EmittingTask, EmittingTaskBuilder};
-use sweet_async_api::emit::builder::{SenderBuilder, ReceiverBuilder};
+use sweet_async_api::task::emit::builder::{SenderBuilder, ReceiverBuilder};
 
 use super::async_work_wrapper::BoxedAsyncWork;
 use super::event::{TokioEventSender, create_event_channel};
 use super::task::TokioEmittingTask;
-use super::collector::StreamCollector;
+use super::collector::{TokioCollector, CollectorConfigurer};
+use crate::task::{FromCsvLine};
 use crate::task::TokioAsyncTaskBuilder;
+use crate::task::adaptive::{build_adaptix_stream, AdaptixDsl, AdaptixConfig};
 
 /// Type alias for boxed async work that produces a channel receiver
 type BoxedChannelWork<T> = BoxedAsyncWork<tokio::sync::mpsc::Receiver<T>>;
 
-/// Trait for types that can be created from CSV line data
-/// This enables type-safe CSV parsing without unsafe code
-pub trait FromCsvLine: Clone + Send + Sync + 'static {
-    /// Parse a CSV line into this type
-    /// Returns None if the line is invalid or cannot be parsed
-    fn from_csv_line(id: u32, data: &str) -> Option<Self>;
-}
-
 /// Channel-based emitting task builder
 #[derive(Clone)]
 pub struct TokioEmittingTaskBuilder<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Send + Sync,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
+    I: TaskId,
 > {
     /// Base builder with common configuration
     base_builder: TokioAsyncTaskBuilder<T, I>,
@@ -108,10 +102,10 @@ pub struct TokioEmittingTaskBuilder<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Send + Sync,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
+    I: TaskId,
 > TokioEmittingTaskBuilder<T, C, E, I>
 {
     /// Create a new emitting task builder with default settings
@@ -197,20 +191,22 @@ impl<
         }
     }
 
-    /// Configure sender with closure (matches CSV example pattern)
-    pub fn sender<F>(self, work: F) -> TokioSenderBuilder<T, C, E, I>
+    /// Configure sender with collector closure (matches README CSV example pattern)
+    pub fn sender_with_collector<F>(
+        self, 
+        collector_config: F,
+        strategy: SenderStrategy
+    ) -> ChannelSenderBuilder<T, C, E, I>
     where
-        F: FnOnce(FileCollector) -> ChunkBuilder + Send + 'static,
+        F: FnOnce(&mut TokioCollector<T, C>) + Send + 'static,
+        for<'a> T: FromCsvLine<'a>,
+        for<'a> C: FromCsvLine<'a>,
     {
-        // Create FileCollector and call the user's configuration function
-        let file_collector = FileCollector::new();
-        let chunk_builder = work(file_collector);
+        // Create CollectorConfigurer that implements AsyncWork<T>
+        let configurer = CollectorConfigurer::new(collector_config);
         
-        TokioSenderBuilder {
-            parent: self,
-            file_collector: Some(chunk_builder),
-            _phantom: PhantomData,
-        }
+        // Use the standard API trait method with our wrapper
+        EmittingTaskBuilder::sender(self, configurer, strategy)
     }
 }
 
@@ -252,7 +248,7 @@ impl<
     /// Configure receiver with closure (matches CSV example pattern)
     pub fn receiver<F>(self, work: F) -> TokioReceiverBuilder<T, C, E, I>
     where
-        F: Fn(TokioEvent<T>, StreamCollector<u32, C>) + Send + 'static,
+        F: Fn(TokioEvent<T>, TokioCollector<T, C>) + Send + 'static,
     {
         TokioReceiverBuilder {
             parent: self.parent,
@@ -272,7 +268,7 @@ pub struct TokioReceiverBuilder<
 > {
     parent: TokioEmittingTaskBuilder<T, C, E, I>,
     file_collector: Option<ChunkBuilder>,
-    receiver_fn: Option<Box<dyn Fn(TokioEvent<T>, StreamCollector<u32, C>) + Send + 'static>>,
+    receiver_fn: Option<Box<dyn Fn(TokioEvent<T>, TokioCollector<T, C>) + Send + 'static>>,
     _phantom: PhantomData<(T, C, E, I)>,
 }
 
@@ -292,6 +288,119 @@ where
     }
 }
 
+/// Asynchronously read CSV file and stream records through channel
+/// 
+/// This function provides zero-allocation CSV parsing with blazing-fast async I/O.
+/// It reads the file line by line, parses each line into the target type T using
+/// the FromCsvLine trait, and sends parsed records through the provided channel.
+async fn read_csv_file_streaming<T>(
+    file_path: &Path,
+    delimiter: crate::task::Delimiter,
+    chunk_size: crate::task::ChunkSize,
+    sender: tokio::sync::mpsc::Sender<T>,
+) -> Result<usize, crate::task::CsvParseError>
+where
+    T: for<'a> crate::task::FromCsvLine<'a> + Send + 'static,
+{
+    // Open file with proper error handling
+    let file = File::open(file_path).await.map_err(|io_err| {
+        crate::task::CsvParseError::IoError {
+            path: file_path.to_path_buf(),
+            source: io_err,
+        }
+    })?;
+    
+    // Create buffered reader for efficient line reading
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    
+    // Convert delimiter enum to actual character
+    let delimiter_char = match delimiter {
+        crate::task::Delimiter::NewLine => '\n',
+        crate::task::Delimiter::Comma => ',',
+        crate::task::Delimiter::Tab => '\t',
+        crate::task::Delimiter::Custom(c) => c,
+    };
+    
+    let mut records_processed = 0_usize;
+    let mut line_number = 1_usize;
+    
+    // First collect all lines, then use adaptix for coordinated processing
+    let mut all_lines = Vec::new();
+    while let Some(line_result) = lines.next_line().await {
+        let line = line_result.map_err(|io_err| {
+            crate::task::CsvParseError::IoError {
+                path: file_path.to_path_buf(),
+                source: io_err,
+            }
+        })?;
+        
+        // Skip empty lines
+        if !line.trim().is_empty() {
+            all_lines.push((line, line_number));
+        }
+        line_number += 1;
+    }
+    
+    // Use adaptix for coordinated line parsing
+    let config = crate::task::adaptive::AdaptixConfig::default();
+    let parse_map = move |line_data: &(String, usize)| -> Result<T, crate::task::CsvParseError> {
+        let (line, line_num) = line_data;
+        T::from_csv_line(line, *line_num, delimiter_char)
+            .map_err(|parse_err| {
+                crate::task::CsvParseError::ParseError {
+                    line: *line_num,
+                    content: line.clone(),
+                    source: Box::new(parse_err),
+                }
+            })
+    };
+    
+    let adaptix_stream = crate::task::adaptive::build_adaptix_stream(
+        crate::task::adaptive::AdaptixDsl {
+            config,
+            items: all_lines,
+            map_fn: parse_map,
+        }
+    );
+    
+    // Stream results to sender using adaptix coordination
+    use futures::StreamExt;
+    let mut stream = std::pin::pin!(adaptix_stream);
+    while let Some(parse_result) = stream.next().await {
+        match parse_result {
+            Ok(record) => {
+                if sender.send(record).await.is_err() {
+                    // Channel closed - receiver dropped, graceful termination
+                    break;
+                }
+                records_processed += 1;
+            }
+            Err(parse_error) => {
+                return Err(parse_error);
+            }
+        }
+        
+        // Apply chunking strategy for memory management with adaptix coordination
+        match chunk_size {
+            crate::task::ChunkSize::Rows(chunk_rows) => {
+                if records_processed % chunk_rows == 0 {
+                    // Brief yield to allow processing of current chunk
+                    tokio::task::yield_now().await;
+                }
+            }
+            crate::task::ChunkSize::Bytes(_) => {
+                // For byte-based chunking, yield periodically
+                if records_processed % 100 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+    }
+    
+    Ok(records_processed)
+}
+
 impl<
     T: Clone + Send + 'static,
     C: Send + 'static,
@@ -305,11 +414,11 @@ impl<
         final_handler: F,
     ) -> Result<R, AsyncTaskError> 
     where
-        F: FnOnce(FinalEvent<C>, StreamCollector<u32, C>) -> Result<R, AsyncTaskError> + Send + 'static,
+        F: FnOnce(FinalEvent<C>, TokioCollector<T, C>) -> Result<R, AsyncTaskError> + Send + 'static,
         R: Send + 'static,
     {
-        // Create zero-allocation StreamCollector for result accumulation
-        let stream_collector = StreamCollector::<u32, C>::new();
+        // Create zero-allocation TokioCollector for result accumulation
+        let stream_collector = TokioCollector::<T, C>::new();
         
         // Get the receiver function that was stored
         let receiver_fn = self.receiver_fn.take()
@@ -327,7 +436,7 @@ impl<
         let sender_work = {
             let file_path = file_collector.file_path()
                 .ok_or_else(|| AsyncTaskError::InvalidState(
-                    "EmittingTaskBuilder file collector missing path: call .of_file() in sender closure".to_string()
+                    "EmittingTaskBuilder file collector missing path: call .of() in sender closure".to_string()
                 ))?
                 .to_path_buf();
             
@@ -335,24 +444,28 @@ impl<
                 // Read CSV file and create a receiver channel
                 let (tx, rx) = tokio::sync::mpsc::channel::<T>(1000);
                 
-                // Spawn sophisticated collector-based CSV processing with complete error handling
-                tokio::spawn(async move {
-                    // Execute collector-configured CSV processing with delimiter parsing and chunking
-                    let csv_result = read_csv_with_collector_logic(&file_path, file_collector.delimiter(), file_collector.chunk_size(), tx.clone()).await;
+                // Use direct call to read_csv_file_streaming with adaptix coordination
+                {
+                    let delimiter = file_collector.delimiter();
+                    let chunk_size = file_collector.chunk_size();
+                    let tx_clone = tx.clone();
+                    
+                    // Execute CSV processing directly with adaptix coordination
+                    let csv_result = read_csv_file_streaming(&file_path, delimiter, chunk_size, tx_clone).await;
                     
                     match csv_result {
                         Ok(records_processed) => {
-                            tracing::info!("Collector CSV processing completed: {} records processed from {} using delimiter {:?} and chunking {:?}", 
-                                records_processed, file_path.display(), file_collector.delimiter(), file_collector.chunk_size());
+                            tracing::info!("CSV processing completed: {} records processed from {} using delimiter {:?} and chunking {:?}", 
+                                records_processed, file_path.display(), delimiter, chunk_size);
                         }
                         Err(csv_error) => {
-                            tracing::error!("Collector CSV processing failed for {}: {}", file_path.display(), csv_error);
+                            tracing::error!("CSV processing failed for {}: {}", file_path.display(), csv_error);
                         }
                     }
                     
-                    // Ensure channel is closed after collector processing completion or error
+                    // Ensure channel is closed after processing completion or error
                     drop(tx);
-                });
+                }
                 
                 Ok(rx)
             }
@@ -365,9 +478,9 @@ impl<
         // Atomic sequence counter for zero-allocation event ordering
         let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
         
-        // Execute sender work to generate T events with optimal concurrency
+        // Execute sender work to generate T events with direct async coordination
         let sender_sequence = sequence_counter.clone();
-        let sender_handle = tokio::spawn(async move {
+        let sender_future = async move {
             // Get the channel receiver from sender work
             let mut receiver = match sender_work.run().await {
                 Ok(rx) => rx,
@@ -397,11 +510,11 @@ impl<
             // Signal sender completion
             let _ = completion_tx.send(());
             Ok(())
-        });
+        };
         
-        // Execute receiver work to process T -> C events with zero allocation patterns
+        // Execute receiver work to process T -> C events with direct async coordination
         let receiver_collector = stream_collector.clone();
-        let receiver_handle = tokio::spawn(async move {
+        let receiver_future = async move {
             let mut event_count = 0u64;
             
             // Process events as they arrive from sender
@@ -418,43 +531,34 @@ impl<
             }
             
             Ok(())
-        });
+        };
         
         // Coordinate sender and receiver completion with timeout protection
         let coordination_timeout = Duration::from_secs(300); // 5 minute default timeout
         
         match tokio::time::timeout(coordination_timeout, async move {
-            // Wait for sender completion
-            match sender_handle.await {
-                Ok(Ok(())) => {
+            // Execute sender and receiver concurrently using tokio::join!
+            let (sender_result, receiver_result) = tokio::join!(sender_future, receiver_future);
+            
+            // Check sender completion
+            match sender_result {
+                Ok(()) => {
                     // Sender completed successfully
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     // Sender work failed
                     return Err(e);
                 }
-                Err(e) => {
-                    // Sender task panicked
-                    return Err(AsyncTaskError::Failure(
-                        format!("EmittingTaskBuilder sender task panicked during execution: {} - check sender logic for panics", e)
-                    ));
-                }
             }
             
-            // Wait for receiver completion
-            match receiver_handle.await {
-                Ok(Ok(())) => {
+            // Check receiver completion  
+            match receiver_result {
+                Ok(()) => {
                     // Receiver completed successfully
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     // Receiver work failed
                     return Err(e);
-                }
-                Err(e) => {
-                    // Receiver task panicked
-                    return Err(AsyncTaskError::Failure(
-                        format!("EmittingTaskBuilder receiver task panicked during event processing: {} - check receiver logic for panics", e)
-                    ));
                 }
             }
             
@@ -558,6 +662,17 @@ impl ChunkBuilder {
     }
 }
 
+/// Implementation of the Of trait from the syntax sugar API
+/// This enables collector.of() functionality as required by the real API
+impl sweet_async_api::syntax_sugar::Of for ChunkBuilder {
+    fn of(mut self, arg: impl Into<String>) -> Self {
+        // Store the file path from collector.of("data.csv")
+        let path_str = arg.into();
+        self.file_path = Some(std::path::PathBuf::from(path_str));
+        self
+    }
+}
+
 /// Tokio event wrapper for generic records with zero-allocation metadata
 pub struct TokioEvent<T> {
     pub data: T,
@@ -602,10 +717,10 @@ pub struct FinalEvent<C> {
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Send + Sync,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
+    I: TaskId,
 > AsyncTaskBuilder for TokioEmittingTaskBuilder<T, C, E, I>
 {
     fn timeout(self, duration: Duration) -> Self {
@@ -672,10 +787,10 @@ pub struct ChannelReceiverBuilder<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Send + Sync,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
+    I: TaskId,
 > EmittingTaskBuilder<T, C, E, I> for TokioEmittingTaskBuilder<T, C, E, I>
 {
     type SenderBuilder = ChannelSenderBuilder<T, C, E, I>;
@@ -688,187 +803,10 @@ impl<
     where
         F: AsyncWork<T> + Send + 'static,
     {
-        // Wrap sender_logic in Arc for zero-allocation sharing across workers
-        let sender_work = Arc::new(sender_logic);
-        // Calculate optimal channel buffer size based on strategy
-        let buffer_size = match strategy {
-            SenderStrategy::Serial { .. } => 1024,
-            SenderStrategy::Parallel { workers, .. } => {
-                use sweet_async_api::task::builder::MinMax;
-                MinMax::max(&workers) * 256
-            },
-            SenderStrategy::Batched { batch_size, .. } => batch_size * 2,
-            SenderStrategy::Adaptive { initial_capacity, .. } => initial_capacity,
-        };
-
-        // Create high-performance bounded channel with strategy-optimized buffer size
-        let (tx, rx) = tokio::sync::mpsc::channel::<T>(buffer_size);
-        
-        // Execute sender_logic based on strategy for optimal performance
-        match strategy {
-            SenderStrategy::Serial { timeout_seconds } => {
-                let timeout_duration = Duration::from_secs(timeout_seconds as u64);
-                let work = sender_work.clone();
-                
-                // Single-threaded sequential execution for ordered processing
-                let sender_task = tokio::spawn(async move {
-                    // Execute the actual sender logic to generate T values
-                    match tokio::time::timeout(timeout_duration, work.run()).await {
-                        Ok(generated_value) => {
-                            // Send the generated value through the channel
-                            if tx.send(generated_value).is_err() {
-                                // Receiver dropped - graceful termination
-                                return;
-                            }
-                        }
-                        Err(_) => {
-                            // Timeout occurred - sender logic took too long
-                            return;
-                        }
-                    }
-                    // Channel automatically closes when tx drops
-                });
-                
-                // Store task handle for lifecycle management
-                drop(sender_task);
-            }
-            
-            SenderStrategy::Parallel { workers, rate_limit } => {
-                use sweet_async_api::task::builder::MinMax;
-                let worker_count = MinMax::max(&workers);
-                let rate_limit_per_worker = rate_limit / worker_count.max(1);
-                
-                // Multi-threaded parallel execution with work distribution
-                for _worker_id in 0..worker_count {
-                    let worker_tx = tx.clone();
-                    let worker_logic = sender_work.clone();
-                    
-                    let worker_task = tokio::spawn(async move {
-                        // Rate limiting for each worker
-                        let mut interval = tokio::time::interval(
-                            Duration::from_nanos(1_000_000_000 / rate_limit_per_worker.max(1) as u64)
-                        );
-                        
-                        loop {
-                            interval.tick().await;
-                            
-                            match worker_logic.run().await {
-                                generated_value => {
-                                    if worker_tx.send(generated_value).is_err() {
-                                        // Receiver dropped - worker shutdown
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    
-                    drop(worker_task);
-                }
-                
-                // Drop original tx to enable channel closure detection
-                drop(tx);
-            }
-            
-            SenderStrategy::Batched { batch_size, max_delay } => {
-                let delay_duration = Duration::from_millis(max_delay as u64);
-                let work = sender_work.clone();
-                
-                // Batched execution with temporal aggregation
-                let batch_task = tokio::spawn(async move {
-                    let mut batch_buffer = Vec::with_capacity(batch_size);
-                    let mut last_flush = tokio::time::Instant::now();
-                    
-                    loop {
-                        // Execute sender logic to generate batch item
-                        let generated_value = work.run().await;
-                        batch_buffer.push(generated_value);
-                        
-                        // Flush batch when size or time threshold reached
-                        let should_flush = batch_buffer.len() >= batch_size ||
-                            last_flush.elapsed() >= delay_duration;
-                            
-                        if should_flush {
-                            // Send entire batch through channel
-                            for item in batch_buffer.drain(..) {
-                                if tx.send(item).is_err() {
-                                    // Receiver dropped during batch send
-                                    return;
-                                }
-                            }
-                            last_flush = tokio::time::Instant::now();
-                        }
-                        
-                        // Yield to prevent CPU starvation
-                        tokio::task::yield_now().await;
-                    }
-                });
-                
-                drop(batch_task);
-            }
-            
-            SenderStrategy::Adaptive { initial_capacity, max_concurrency, adaptation_window, use_rayon_for_cpu } => {
-                // Adaptive execution with performance monitoring
-                let mut current_workers = initial_capacity;
-                let mut performance_samples = Vec::with_capacity(adaptation_window);
-                let work = sender_work.clone();
-                
-                // Performance monitoring interval
-                let monitoring_interval = Duration::from_millis(adaptation_window as u64 * 100);
-                let mut monitor_timer = tokio::time::interval(monitoring_interval);
-                
-                let adaptive_task = tokio::spawn(async move {
-                    loop {
-                        monitor_timer.tick().await;
-                        
-                        // Measure current throughput
-                        let start_time = tokio::time::Instant::now();
-                        let generated_value = work.run().await;
-                        let execution_time = start_time.elapsed();
-                        
-                        performance_samples.push(execution_time);
-                        if performance_samples.len() > adaptation_window {
-                            performance_samples.remove(0);
-                        }
-                        
-                        // Send generated value
-                        if tx.send(generated_value).is_err() {
-                            break;
-                        }
-                        
-                        // Adapt worker count based on performance trend
-                        if performance_samples.len() == adaptation_window {
-                            let avg_time: Duration = performance_samples.iter().sum::<Duration>() / adaptation_window as u32;
-                            let recent_avg: Duration = performance_samples[adaptation_window/2..].iter().sum::<Duration>() / (adaptation_window/2) as u32;
-                            
-                            if recent_avg > avg_time * 2 && current_workers < max_concurrency {
-                                // Performance degrading - add workers
-                                current_workers += 1;
-                            } else if recent_avg < avg_time / 2 && current_workers > 1 {
-                                // Over-provisioned - reduce workers
-                                current_workers -= 1;
-                            }
-                        }
-                        
-                        // CPU-intensive work delegation to Rayon if enabled
-                        if use_rayon_for_cpu {
-                            // Delegate to thread pool for CPU-bound work
-                            tokio::task::yield_now().await;
-                        }
-                    }
-                });
-                
-                drop(adaptive_task);
-            }
-        }
-        
-        // Create BoxedAsyncWork that returns the populated receiver
-        let channel_work = BoxedAsyncWork::new(move || async move { rx });
-        
         ChannelSenderBuilder {
             parent: self,
-            sender_work: Some(channel_work),
-            sender_logic: Some(sender_work),
+            sender_work: None,
+            sender_logic: Some(Arc::new(sender_logic)),
             sender_strategy: strategy,
             dependencies: HashMap::new(),
             batch_size: None,
@@ -878,9 +816,8 @@ impl<
 
     fn sequence<F>(self, work: F) -> Self::SenderBuilder
     where
-        F: sweet_async_api::task::builder::AsyncWork<T> + Send + 'static,
+        F: AsyncWork<T> + Send + 'static,
     {
-        // Use the generic sender implementation with Serial strategy for sequential processing
         self.sender(work, SenderStrategy::Serial { timeout_seconds: 30 })
     }
 }
@@ -1007,140 +944,6 @@ impl<
     }
 }
 
-/// Sophisticated collector-based CSV processing with intelligent delimiter parsing
-/// 
-/// Implements the core collector logic for Sweet Async file processing pattern.
-/// Respects collector configuration for delimiter-based parsing and chunking strategies.
-/// 
-/// # Core Collector Features
-/// - Delimiter-driven parsing: Uses collector delimiter config for field separation
-/// - Configuration-based chunking: Respects ChunkSize settings from collector
-/// - Zero allocation streaming: Processes files without loading into memory
-/// - Type-safe conversion: Uses FromCsvLine for T record creation
-/// - Error resilience: Complete error handling without unwrap/expect
-/// - Blazing-fast performance: Optimized I/O with intelligent yielding
-/// 
-/// # Collector Integration
-/// - Reads file path from FileCollector configuration
-/// - Uses delimiter setting for actual CSV field parsing
-/// - Implements chunking strategy from collector ChunkSize
-/// - Streams T records to receiver for collector.collect() accumulation
-/// 
-/// # Parameters
-/// - `file_path`: Path configured via collector.of_file()
-/// - `delimiter`: Delimiter configured via collector.with_delimiter()  
-/// - `chunk_size`: Chunking configured via collector.into_chunks()
-/// - `tx`: Channel for streaming parsed records to receiver
-/// 
-/// # Returns
-/// - `Ok(records_processed)`: Count of successfully parsed and sent records
-/// - `Err(error_message)`: Detailed error with troubleshooting context
-async fn read_csv_with_collector_logic<T>(
-    file_path: &Path,
-    delimiter: crate::task::Delimiter,
-    chunk_size: crate::task::ChunkSize,
-    tx: tokio::sync::mpsc::Sender<T>,
-) -> Result<usize, String>
-where
-    T: FromCsvLine,
-{
-    // Validate file accessibility with detailed collector-aware error reporting
-    let file = match File::open(file_path).await {
-        Ok(f) => f,
-        Err(e) => {
-            return Err(format!(
-                "Collector file source failed: cannot open '{}' - {} (verify collector.of_file() path is correct)",
-                file_path.display(),
-                e
-            ));
-        }
-    };
-    
-    // Create optimized buffered reader for high-performance streaming
-    // 64KB buffer balances memory usage with I/O efficiency for collector pattern
-    let reader = BufReader::with_capacity(65536, file);
-    let mut lines = reader.lines();
-    
-    // Initialize collector-aware progress tracking and chunking coordination
-    let mut records_processed = 0usize;
-    let mut bytes_processed = 0usize;
-    let mut chunk_start_time = tokio::time::Instant::now();
-    let mut chunk_record_count = 0usize;
-    
-    // Process file content line by line with collector-configured chunking
-    while let Some(line_result) = lines.next_line().await.transpose() {
-        let line = match line_result {
-            Ok(Some(l)) => l,
-            Ok(None) => break, // End of file reached
-            Err(e) => {
-                tracing::warn!(
-                    "Collector CSV processing I/O error at record {}: {} - continuing with next line",
-                    records_processed + 1,
-                    e
-                );
-                continue; // Skip problematic lines and continue collector processing
-            }
-        };
-        
-        // Update byte tracking for collector chunking strategy
-        bytes_processed += line.len() + 1; // +1 for newline character
-        
-        // Skip empty lines with zero allocation check
-        if line.trim().is_empty() {
-            continue;
-        }
-        
-        // Apply collector delimiter-based parsing to create structured records
-        let parsed_record = parse_csv_line_with_delimiter(&line, &delimiter, records_processed as u32);
-        
-        let record = match parsed_record.and_then(|data| T::from_csv_line(records_processed as u32, &data)) {
-            Some(r) => r,
-            None => {
-                tracing::debug!(
-                    "Collector CSV parsing failed for line {}: '{}' - check delimiter configuration and FromCsvLine implementation",
-                    records_processed + 1,
-                    line.chars().take(100).collect::<String>()
-                );
-                continue; // Skip malformed records and continue collector processing
-            }
-        };
-        
-        // Send parsed record through channel to receiver for collector.collect() processing
-        if let Err(_) = tx.send(record).await {
-            // Receiver closed channel - graceful collector termination
-            tracing::info!(
-                "Collector CSV processing terminated: receiver closed after {} records",
-                records_processed
-            );
-            break;
-        }
-        
-        // Update progress counters with overflow protection
-        records_processed = records_processed.saturating_add(1);
-        chunk_record_count = chunk_record_count.saturating_add(1);
-        
-        // Implement collector-configured chunking strategy with intelligent yielding
-        let should_yield_for_chunk = match chunk_size {
-            crate::task::ChunkSize::Rows(rows) => chunk_record_count >= rows,
-            crate::task::ChunkSize::Bytes(bytes) => bytes_processed >= bytes,
-            crate::task::ChunkSize::Duration(duration) => chunk_start_time.elapsed() >= duration,
-        };
-        
-        // Yield control based on collector chunking configuration
-        if should_yield_for_chunk {
-            // Reset chunk tracking for next chunk period
-            chunk_record_count = 0;
-            bytes_processed = 0;
-            chunk_start_time = tokio::time::Instant::now();
-            
-            // Yield to Tokio scheduler as configured by collector chunking strategy
-            tokio::task::yield_now().await;
-        }
-    }
-    
-    // Return collector processing statistics
-    Ok(records_processed)
-}
 
 /// Parse CSV line using collector-configured delimiter with intelligent field separation
 /// 

@@ -75,7 +75,7 @@ enum ConcurrencyEngine {
 
 impl ConcurrencyEngine {
     /// Build a new Rayon engine with `threads` number of threads.
-    /// If Rayon thread pool creation fails completely, falls back to Tokio engine.
+    /// If Rayon thread pool creation fails, falls back to Tokio engine.
     fn new_rayon(threads: usize) -> Self {
         match rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
@@ -84,30 +84,8 @@ impl ConcurrencyEngine {
                 pool: Arc::new(pool),
             },
             Err(e) => {
-                warn!("Failed to build Rayon ThreadPool with {} threads: {}, trying fallback", threads, e);
-                // Fallback to a default pool with fewer threads
-                match rayon::ThreadPoolBuilder::new()
-                    .num_threads(num_cpus::get().max(1))
-                    .build() {
-                    Ok(pool) => ConcurrencyEngine::Rayon {
-                        pool: Arc::new(pool),
-                    },
-                    Err(e2) => {
-                        // Final fallback: try single-threaded pool
-                        match rayon::ThreadPoolBuilder::new()
-                            .num_threads(1)
-                            .build() {
-                            Ok(pool) => ConcurrencyEngine::Rayon {
-                                pool: Arc::new(pool),
-                            },
-                            Err(e3) => {
-                                // If all Rayon pool creation fails, fall back to Tokio engine
-                                warn!("All Rayon thread pool creation attempts failed: {}, {}, {} - falling back to Tokio engine", e, e2, e3);
-                                ConcurrencyEngine::Tokio
-                            }
-                        }
-                    }
-                }
+                warn!("Failed to build Rayon ThreadPool with {} threads: {}, falling back to Tokio engine", threads, e);
+                ConcurrencyEngine::Tokio
             }
         }
     }
@@ -180,16 +158,13 @@ enum EngineTask<T> {
 impl<T: Send + 'static> EngineTask<T> {
     /// Wait for the chunk result asynchronously.
     pub async fn wait(self) -> Result<T, String> {
-        match self {
-            EngineTask::Rayon(mut rx) => rx
-                .recv()
-                .await
-                .ok_or_else(|| "Rayon EngineTask: Channel closed unexpectedly".to_string()),
-            EngineTask::Tokio(mut rx) => rx
-                .recv()
-                .await
-                .ok_or_else(|| "Tokio EngineTask: Channel closed unexpectedly".to_string()),
-        }
+        let mut rx = match self {
+            EngineTask::Rayon(rx) => rx,
+            EngineTask::Tokio(rx) => rx,
+        };
+        rx.recv()
+            .await
+            .ok_or_else(|| "EngineTask: Channel closed unexpectedly".to_string())
     }
 }
 
@@ -229,14 +204,6 @@ impl AdaptixStats {
         }
     }
 
-    // Method to update the semaphore when current_workers changes
-    fn update_semaphore(&mut self) {
-        // Create a new semaphore with the updated number of workers.
-        // Existing tasks holding permits from the old semaphore will complete normally.
-        // New tasks will acquire permits from this new semaphore.
-        self.concurrency_sema = Arc::new(Semaphore::new(self.current_workers.max(1)));
-        debug!("Semaphore updated to {} permits", self.current_workers);
-    }
 }
 
 /// Decide if we should switch between CPU-bound (Rayon) or IO-bound (Tokio),
@@ -285,7 +252,12 @@ fn adapt_concurrency(st: &mut AdaptixStats, cfg: &AdaptixConfig) {
     }
 
     if st.current_workers != prev_workers {
-        st.update_semaphore(); // Update semaphore if worker count changed
+        // Update semaphore with direct operations
+        st.concurrency_sema.close();
+        st.concurrency_sema.add_permits(
+            st.current_workers.saturating_sub(st.concurrency_sema.available_permits())
+        );
+        debug!("Semaphore updated to {} permits", st.current_workers);
     }
 
     st.task_durations.clear();
@@ -449,13 +421,6 @@ where
                         && stats.last_adapt.elapsed().as_millis() > config.adapt_interval_ms as u128
                     {
                         adapt_concurrency(&mut stats, &config);
-                        // Update the concurrency semaphore size
-                        concurrency_sema.close();
-                        concurrency_sema.add_permits(
-                            stats
-                                .current_workers
-                                .saturating_sub(concurrency_sema.available_permits()),
-                        );
                     }
                 }
                 Err(e) => {

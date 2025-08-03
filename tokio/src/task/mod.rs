@@ -43,7 +43,7 @@ pub use cancellable_task::*;
 pub use cpu_usage::*;
 pub use emit::task::{TokioEmittingTask, TokioSenderTask, TokioReceiverTask};
 pub use emit::TokioFinalEvent;
-pub use emit::collector::{StreamCollector, CsvFileBuilder, execute_csv_streaming};
+pub use emit::collector::{TokioCollector, DataSourceConfig};
 pub use io_usage::*;
 pub use memory_usage::*;
 pub use message_builder::*;
@@ -60,14 +60,7 @@ pub use timed_task::*;
 pub use tracing_task::*;
 pub use tokio_task::*;
 
-// CSV processing types
-pub use CsvRecord;
-pub use FromCsvLine;
-pub use CsvParseError;
-pub use ChunkSize;
-pub use Delimiter;
-pub use DurationExt;
-pub use RowsExt;
+// CSV processing types (exported via emit module)
 
 // Extension traits for ergonomic API syntax
 

@@ -49,7 +49,8 @@
       "mcp__desktop-commander__search_files",
       "mcp__desktop-commander__interact_with_process",
       "Bash(rg:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(git clone:*)"
     ],
     "deny": []
   },

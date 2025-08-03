@@ -18,8 +18,15 @@ pub use channel_builder::{
     ChannelReceiverBuilder as TokioReceiverBuilder, 
     ChannelSenderBuilder as TokioSenderBuilder,
 };
-pub use collector::{TokioEventCollector, StreamCollector};
+
+// Use the collector implementation
+pub use collector::{TokioCollector, DataSourceConfig};
+
+// Use event types
 pub use event::{TokioEvent, TokioEventReceiver, TokioEventSender};
+
+// CSV processing types and extension traits
+pub use super::{ChunkSize, Delimiter, DurationExt, RowsExt, CsvRecord, FromCsvLine, CsvParseError};
 
 use std::collections::HashMap;
 use sweet_async_api::task::TaskId;

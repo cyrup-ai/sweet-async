@@ -365,9 +365,14 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
 
     async fn execute_cancellation_callbacks(&self) {
         let mut callbacks = self.cancellation_callbacks.lock().await;
-        for callback in std::mem::take(&mut *callbacks) {
-            tokio::spawn(callback());
-        }
+        let callback_futures: Vec<_> = std::mem::take(&mut *callbacks)
+            .into_iter()
+            .map(|callback| callback())
+            .collect();
+        drop(callbacks);
+        
+        // Execute all callbacks concurrently without manual spawning
+        futures::future::join_all(callback_futures).await;
     }
 
     /// Escalate cancellation to a more aggressive level with zero allocation
@@ -445,12 +450,13 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                             }
                         }
                         Err(_) => {
-                            // Callbacks mutex contended, spawn async cleanup
+                            // Callbacks mutex contended, execute async cleanup directly
                             let callbacks_arc = cancellation_callbacks.clone();
                             let cleanup_flag = cleanup_completed.clone();
                             let timeout_nanos = graceful_timeout_nanos.load(Ordering::Relaxed);
                             
-                            tokio::spawn(async move {
+                            // Execute cleanup directly without spawning
+                            {
                                 let callbacks_guard = callbacks_arc.lock().await;
                                 let callback_futures: Vec<_> = callbacks_guard
                                     .iter()
@@ -463,7 +469,7 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                                     futures::future::join_all(callback_futures)).await.is_ok() {
                                     cleanup_flag.store(true, Ordering::Relaxed);
                                 }
-                            });
+                            }
                         }
                     };
                 }
@@ -558,17 +564,14 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                 callbacks.push(Box::new(move || Box::pin(callback.run())));
             }
             Err(_) => {
-                use std::pin::pin;
                 tracing::debug!(
-                    "Cancellation callbacks mutex contended, spawning async registration"
+                    "Cancellation callbacks mutex contended, using blocking wait for registration"
                 );
 
-                let callbacks_arc = self.cancellation_callbacks.clone();
-                tokio::spawn(async move {
-                    let mut callbacks = callbacks_arc.lock().await;
-                    let future = callback.run();
-                    callbacks.push(Box::new(move || Box::pin(future)));
-                });
+                // Use blocking wait to acquire lock and register callback
+                // This is safer than spawning and ensures callback is registered immediately
+                let mut callbacks = self.cancellation_callbacks.blocking_lock();
+                callbacks.push(Box::new(move || Box::pin(callback.run())));
             }
         }
     }
