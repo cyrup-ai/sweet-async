@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use sweet_async_api::task::ContextualizedTask;
 use crate::task_id_uuid::UuidTaskId;
-use crate::task::task_relationships::{TaskRelationshipManager, TokioTaskRelationships};
+use crate::task::task_relationships::TokioTaskRelationships;
 
 /// Default implementation of task context
 ///
@@ -69,13 +69,13 @@ impl Default for DefaultTaskContext {
 }
 
 /// Example task type that uses DefaultTaskContext
-pub struct TaskWithDefaultContext<T: Clone + Send + Sync + 'static> {
+pub struct TaskWithDefaultContext<T: Clone + Send + Sync + Unpin + 'static> {
     context: DefaultTaskContext,
     relationships: TokioTaskRelationships<T, UuidTaskId>,
     runtime: crate::orchestra::runtime::TokioRuntime,
 }
 
-impl<T: Clone + Send + Sync + 'static> TaskWithDefaultContext<T> {
+impl<T: Clone + Send + Sync + Unpin + 'static> TaskWithDefaultContext<T> {
     pub fn new() -> Self {
         Self {
             context: DefaultTaskContext::new(),
@@ -85,7 +85,7 @@ impl<T: Clone + Send + Sync + 'static> TaskWithDefaultContext<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
+impl<T: Clone + Send + Sync + Unpin + 'static> ContextualizedTask<T, UuidTaskId> for TaskWithDefaultContext<T> {
     type RuntimeType = crate::orchestra::runtime::TokioRuntime;
     type RelationshipsType = TokioTaskRelationships<T, UuidTaskId>;
     

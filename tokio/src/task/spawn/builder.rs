@@ -1,6 +1,6 @@
-use std::future::Future;
+
 use std::marker::PhantomData;
-use std::pin::Pin;
+
 use std::sync::Arc;
 
 use sweet_async_api::task::AsyncTaskError;
@@ -10,7 +10,7 @@ use sweet_async_api::task::builder::AsyncTaskBuilder;
 use sweet_async_api::task::builder::AsyncWork;
 use sweet_async_api::task::spawn::SpawningTaskBuilder;
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
-use sweet_async_api::orchestra::{OrchestratorBuilder, orchestrator::TaskOrchestrator};
+use sweet_async_api::OrchestratorBuilder;
 
 use crate::task::TokioAsyncTaskBuilder;
 use crate::task::relationships::TokioTaskRelationships;
@@ -80,7 +80,7 @@ where
     }
 
     /// Set a descriptive name for the task (internal method)
-    fn name(self, name: &str) -> Self {
+    pub fn name(self, name: &str) -> Self {
         Self {
             base: self.base.name(name),
             ..self
@@ -124,11 +124,12 @@ where
     }
 }
 
+
 impl<T, E, I> SpawningTaskBuilder<T, E, I> for TokioSpawningTaskBuilder<T, E, I>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
     E: std::fmt::Display + Send + 'static,
-    I: TaskId,
+    I: TaskId + Default + Unpin,
     E: Into<AsyncTaskError> + From<AsyncTaskError>,
 {
     type Task = TokioSpawningTask<T, I>;
@@ -191,9 +192,10 @@ where
         F: AsyncWork<R> + Send + 'static,
         R: IntoAsyncResult<T, E> + Send + 'static,
     {
+        let runtime_handle = self.base.runtime().clone();
         let task = self.run(work);
 
-        match self.base.runtime.block_on(task) {
+        match runtime_handle.block_on(task) {
             Ok(value) => Ok(value),
             Err(err) => Err(E::from(err)),
         }
@@ -206,26 +208,28 @@ where
         R: IntoAsyncResult<T, E> + Send + 'static,
         H: AsyncWork<Out> + Send + 'static,
     {
+        let runtime_handle = self.base.runtime().clone();
         let _result = self.await_result(work);
 
-        self.base.runtime.block_on(handler.run())
+        runtime_handle.block_on(handler.run())
     }
 }
 
-// Polymorphic implementation: Allow using custom orchestrator
-impl<T, E, I> OrchestratorBuilder<T, TokioSpawningTask<T, I>, I> for TokioSpawningTaskBuilder<T, E, I>
+
+// Generic implementation for any Task that implements AsyncTask
+impl<T, E, I, Task> OrchestratorBuilder<T, Task, I> for TokioSpawningTaskBuilder<T, E, I>
 where
     T: Clone + Send + 'static,
     E: Send + 'static,
     I: TaskId,
+    Task: sweet_async_api::task::AsyncTask<T, I>,
 {
-    type Next = crate::orchestra::TokioTaskBuilderWithOrchestrator<T, I>;
+    type Next = Self;
     
-    fn orchestrator<O: TaskOrchestrator<T, TokioSpawningTask<T, I>, I>>(
+    fn orchestrator<O: sweet_async_api::orchestra::orchestrator::TaskOrchestrator<T, Task, I>>(
         self,
-        orchestrator: &O,
+        _orchestrator: &O,
     ) -> Self::Next {
-        use crate::orchestra::TokioTaskBuilderWithOrchestrator;
-        TokioTaskBuilderWithOrchestrator::new_with_orchestrator(orchestrator)
+        self
     }
 }

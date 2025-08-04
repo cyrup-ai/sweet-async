@@ -11,7 +11,7 @@ use tokio::runtime::Handle;
 
 use sweet_async_api::orchestra::OrchestratorError;
 use sweet_async_api::orchestra::runtime::Runtime;
-use sweet_async_api::task::{AsyncTaskError, TaskId, TaskPriority};
+use sweet_async_api::task::{TaskId, TaskPriority};
 use sweet_async_api::task::spawn::SpawningTask;
 
 use crate::task::spawn::spawning_task::TokioSpawningTask;
@@ -93,13 +93,13 @@ impl<T: Clone + Send + 'static, I: TaskId> Runtime<T, I> for TokioRuntime {
         
         // Wait for active tasks to complete within timeout
         let start = std::time::Instant::now();
-        while self.active_task_count() > 0 && start.elapsed() < timeout {
+        while Runtime::<(), crate::task::task_id::TokioTaskId>::active_task_count(self) > 0 && start.elapsed() < timeout {
             std::thread::sleep(Duration::from_millis(10));
         }
         
-        if self.active_task_count() > 0 {
+        if Runtime::<(), crate::task::task_id::TokioTaskId>::active_task_count(self) > 0 {
             Err(OrchestratorError::OperationFailed(
-                format!("Shutdown timeout: {} tasks still active", self.active_task_count())
+                format!("Shutdown timeout: {} tasks still active", Runtime::<(), crate::task::task_id::TokioTaskId>::active_task_count(self))
             ))
         } else {
             Ok(())

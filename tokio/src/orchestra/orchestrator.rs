@@ -22,8 +22,8 @@ use crate::task::tokio_task::TokioTask;
 /// Advanced, thread-safe orchestrator for Tokio tasks.
 pub struct TokioOrchestrator<T, I>
 where
-    T: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static,
 {
     tasks: Arc<Mutex<HashMap<I, TokioTask<T, I>>>>,
     deps:  Arc<Mutex<HashMap<I, HashSet<I>>>>, // dependent -> deps
@@ -33,8 +33,8 @@ where
 
 impl<T, I> TokioOrchestrator<T, I>
 where
-    T: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static,
 {
     pub fn new(runtime: TokioRuntime) -> Self {
         Self {
@@ -69,8 +69,8 @@ type BoxFut<'a, O> = Pin<Box<dyn Future<Output = O> + Send + 'a>>;
 
 impl<T, I, Task> TaskOrchestrator<T, Task, I> for TokioOrchestrator<T, I>
 where
-    T: Clone + Send + Sync + 'static,
-    I: TaskId + Copy + Eq + Hash + Send + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
+    I: TaskId + Copy + Eq + Hash + Send + Unpin + 'static,
     Task: ApiAsyncTask<T, I> + Into<TokioTask<T, I>>,
 {
     type RegisterTaskReturn = I; // Just return the task ID
@@ -183,7 +183,7 @@ where
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orchestrator = this.clone();
                 async move { 
-                    let result: Result<T, AsyncTaskError> = orchestrator.start_task(&id).await;
+                    let result = TaskOrchestrator::<T, TokioTask<T, I>, I>::start_task(&orchestrator, &id).await;
                     (id, result)
                 }
             }))
@@ -252,7 +252,7 @@ where
             futures::future::join_all(ids.into_iter().map(|id| {
                 let orch = this.clone();
                 async move { 
-                    let result: Result<T, AsyncTaskError> = orch.start_task(&id).await;
+                    let result = TaskOrchestrator::<T, TokioTask<T, I>, I>::start_task(&orch, &id).await;
                     (id, result)
                 }
             }))
@@ -325,7 +325,10 @@ where
             if let Some(ids) = ids_opt {
                 futures::future::join_all(ids.into_iter().map(|id| {
                     let orch = this.clone();
-                    async move { (id, orch.start_task(&id).await) }
+                    async move { 
+                        let result = TaskOrchestrator::<T, TokioTask<T, I>, I>::start_task(&orch, &id).await;
+                        (id, result)
+                    }
                 }))
                 .await
             } else {
@@ -339,7 +342,7 @@ where
             Ok(g) => {
                 if let Some(set) = g.get(group_name).cloned() {
                     set.into_iter()
-                        .filter(|id| self.cancel_task(id).is_ok())
+                        .filter(|id| TaskOrchestrator::<T, TokioTask<T, I>, I>::cancel_task(self, id).is_ok())
                         .count()
                 } else {
                     0
@@ -356,8 +359,8 @@ where
 // Manual clone because we hold a TokioRuntime (which is Clone) and Mutex fields
 impl<T, I> Clone for TokioOrchestrator<T, I>
 where
-    T: Clone + Send + Sync + 'static,
-    I: TaskId + Copy + Eq + Hash + Send + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
+    I: TaskId + Copy + Eq + Hash + Send + Unpin + 'static,
 {
     fn clone(&self) -> Self {
         Self {

@@ -5,7 +5,7 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
 use sweet_async_api::task::TaskId;
@@ -95,6 +95,7 @@ where
     pub fn is_tracing_enabled(&self) -> bool {
         self.tracing_enabled
     }
+
 }
 
 impl<T, I> ApiAsyncTaskBuilder for TokioAsyncTaskBuilder<T, I>

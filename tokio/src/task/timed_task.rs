@@ -1,8 +1,8 @@
 //! Timed task implementation with timeout and deadline support
 
 use std::future::Future;
-use std::pin::Pin;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use std::time::{Duration, Instant, SystemTime};
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 use sweet_async_api::task::TimedTask;
 use sweet_async_api::task::AsyncTaskError;

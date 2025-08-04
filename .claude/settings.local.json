@@ -50,7 +50,9 @@
       "mcp__desktop-commander__interact_with_process",
       "Bash(rg:*)",
       "Bash(cargo run:*)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "mcp__desktop-commander__force_terminate",
+      "mcp__desktop-commander__get_config"
     ],
     "deny": []
   },

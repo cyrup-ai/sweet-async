@@ -472,7 +472,7 @@ where
 
     tokio::spawn(async move {
         let mut stats = AdaptixStats::new(config.max_workers, config.cpu_chunk_size);
-        let concurrency_sema = Arc::new(Semaphore::new(stats.current_workers.max(1)));
+        let _concurrency_sema = Arc::new(Semaphore::new(stats.current_workers.max(1)));
 
         let mut chunk_buf = Vec::with_capacity(stats.chunk_size);
 
@@ -521,7 +521,7 @@ where
                 break;
             }
 
-            let mut current_chunk_items_count = 0;
+            let mut _current_chunk_items_count = 0;
             while chunk_buf.len() < stats.chunk_size {
                 tokio::select! {
                     biased;
@@ -533,7 +533,7 @@ where
                     maybe_item = input_stream.next() => {
                         if let Some(item) = maybe_item {
                             chunk_buf.push(item);
-                            current_chunk_items_count +=1;
+                            _current_chunk_items_count +=1;
                         } else {
                             item_received_in_batch_or_stream_active = false;
                             break;

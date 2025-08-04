@@ -225,7 +225,7 @@ pub trait CancellableTask<T: Send + 'static> {
     ///
     /// Allows registering cleanup or notification code to run when
     /// cancellation occurs.
-    fn on_cancel<F, Fut>(&self, callback: F)
+    fn on_cancel<F, Fut>(self, callback: F) -> Self
     where
         F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static;

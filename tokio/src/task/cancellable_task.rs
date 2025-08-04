@@ -107,10 +107,9 @@ impl CancellationResult for TokioCancellationResult {
 }
 
 /// Cancellation callback type
-type CancellationCallback = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+type CancellationCallback = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Tokio-specific cancellable task implementation
-#[derive(Debug)]
 pub struct TokioCancellableTask<T: Send + 'static> {
     /// Cancellation flag - atomic for lock-free access
     cancelled: Arc<AtomicBool>,
@@ -121,8 +120,8 @@ pub struct TokioCancellableTask<T: Send + 'static> {
     /// Task handle for actual cancellation
     task_handle: Arc<RwLock<Option<JoinHandle<Result<T, AsyncTaskError>>>>>,
     
-    /// Cancellation callbacks
-    callbacks: Arc<RwLock<Vec<CancellationCallback>>>,
+    /// Immutable cancellation callback property
+    on_cancel_callback: Option<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>>,
     
     /// Child tasks for hierarchical cancellation
     children: Arc<RwLock<Vec<Arc<TokioCancellableTask<T>>>>>,
@@ -135,7 +134,7 @@ impl<T: Send + 'static> TokioCancellableTask<T> {
             cancelled: Arc::new(AtomicBool::new(false)),
             cancellation_level: Arc::new(RwLock::new(None)),
             task_handle: Arc::new(RwLock::new(None)),
-            callbacks: Arc::new(RwLock::new(Vec::new())),
+            on_cancel_callback: None,
             children: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -154,8 +153,8 @@ impl<T: Send + 'static> TokioCancellableTask<T> {
 
     /// Run cancellation callbacks
     async fn run_callbacks(&self) {
-        let callbacks = self.callbacks.read().await;
-        for callback in callbacks.iter() {
+        // Execute the immutable callback property if present
+        if let Some(ref callback) = self.on_cancel_callback {
             let future = callback();
             if let Err(e) = tokio::time::timeout(
                 tokio::time::Duration::from_secs(5),
@@ -191,9 +190,8 @@ impl<T: Send + 'static> TokioCancellableTask<T> {
             }
             CancellationLevel::Kill => {
                 debug!("Performing essential cleanup");
-                // Run only critical callbacks with timeout
-                let callbacks = self.callbacks.read().await;
-                for callback in callbacks.iter().take(3) { // Limit to first 3 callbacks
+                // Run critical callback with timeout
+                if let Some(ref callback) = self.on_cancel_callback {
                     let future = callback();
                     if let Err(e) = tokio::time::timeout(
                         tokio::time::Duration::from_secs(1),
@@ -240,7 +238,7 @@ impl<T: Send + 'static> CancellableTask<T> for TokioCancellableTask<T> {
             {
                 let children = child_tasks.read().await;
                 for child in children.iter() {
-                    if let Err(e) = child.cancel_immediately().await {
+                    if let Err(e) = Box::pin(child.cancel_immediately()).await {
                         warn!("Failed to cancel child task: {:?}", e);
                     }
                 }
@@ -275,22 +273,26 @@ impl<T: Send + 'static> CancellableTask<T> for TokioCancellableTask<T> {
         self.cancelled.load(Ordering::SeqCst)
     }
 
-    fn on_cancel<F, Fut>(&self, callback: F)
+    fn on_cancel<F, Fut>(self, callback: F) -> Self
     where
         F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
+        // Immutable builder pattern: return new instance with callback property
         let callback_wrapper = Box::new(move || {
-            let future = callback.run();
-            Box::pin(future) as Pin<Box<dyn Future<Output = ()> + Send>>
+            Box::pin(async move {
+                let fut = callback.run().await;
+                fut.await
+            }) as Pin<Box<dyn Future<Output = ()> + Send>>
         });
         
-        // Add the callback to the list
-        let callbacks = self.callbacks.clone();
-        tokio::spawn(async move {
-            let mut callbacks = callbacks.write().await;
-            callbacks.push(callback_wrapper);
-        });
+        Self {
+            cancelled: self.cancelled,
+            cancellation_level: self.cancellation_level,
+            task_handle: self.task_handle,
+            on_cancel_callback: Some(callback_wrapper),
+            children: self.children,
+        }
     }
 }
 

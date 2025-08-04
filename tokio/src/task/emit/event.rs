@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use futures::{Future, Sink, Stream};
+use futures::Stream;
 use sweet_async_api::task::emit::ReceiverEvent;
 use tokio::sync::mpsc::{Receiver, Sender};
 

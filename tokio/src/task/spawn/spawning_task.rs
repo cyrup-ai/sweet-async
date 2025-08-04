@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use std::marker::PhantomData;
 
 use tokio::task::JoinHandle;
@@ -11,13 +11,13 @@ use sweet_async_api::task::{
     AsyncTask, AsyncTaskError, TaskId, TaskPriority, TaskStatus, RankableByPriority,
     NamedTask, StatusEnabledTask, PrioritizedTask, TimedTask, TracingTask,
     CancellableTask, CancellationLevel, ContextualizedTask, RecoverableTask,
-    MetricsEnabledTask, RetryStrategy, CpuUsage, MemoryUsage, IoUsage,
+    MetricsEnabledTask, RetryStrategy,
 };
 use sweet_async_api::task::builder::AsyncWork;
-use sweet_async_api::task::spawn::{SpawningTask, TaskResult, AsyncResult};
+use sweet_async_api::task::spawn::SpawningTask;
 use sweet_async_api::orchestra::OrchestratorError;
 
-use crate::task::tokio_task::TokioTask;
+
 use crate::task::spawn::result::{TokioTaskResult, TokioAsyncResult};
 use crate::task::relationships::TokioTaskRelationships;
 
@@ -56,7 +56,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioSpawningTask<T, I> {
         active_tasks: Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         // Generate a new ID if needed
-        let id = if let Ok(id) = std::any::Any::downcast_ref::<I>(&(uuid::Uuid::new_v4() as dyn std::any::Any)) {
+        let id = if let Ok(id) = <dyn std::any::Any>::downcast_ref::<I>(&uuid::Uuid::new_v4() as &dyn std::any::Any) {
             *id
         } else {
             // Fallback - this might not work for all I types, but it's a reasonable attempt
@@ -406,12 +406,27 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioSpawningT
         false
     }
     
-    fn on_cancel<F, Fut>(&self, _callback: F)
+    fn on_cancel<F, Fut>(self, callback: F) -> Self
     where
         F: AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        // Not implemented
+        // Immutable builder pattern: return Self with callback property
+        let callback_wrapper = Box::new(move || {
+            Box::pin(async move {
+                let fut = callback.run().await;
+                fut.await
+            }) as Pin<Box<dyn Future<Output = ()> + Send>>
+        });
+        
+        Self {
+            id: self.id,
+            runtime: self.runtime,
+            status: self.status,
+            result: self.result,
+            handle: self.handle,
+            on_cancel_callback: Some(callback_wrapper),
+        }
     }
     
     fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {

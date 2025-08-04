@@ -1,7 +1,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+
 use std::time::Duration;
 
 use sweet_async_api::orchestra::OrchestratorBuilder;
@@ -13,6 +13,9 @@ use sweet_async_api::task::TaskPriority;
 use sweet_async_api::task::builder::{AsyncTaskBuilder, AsyncWork, SenderBuilder, SenderStrategy};
 use sweet_async_api::task::emit::EmittingTaskBuilder;
 use tokio::runtime::Handle;
+
+// Import our IntoAsyncResult implementations
+use crate::task::spawn::into_async_result::IntoAsyncResult;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -35,13 +38,13 @@ fn spawning_builder<T: Clone + Send + 'static, E: Clone + Send + 'static, I: Tas
 }
 
 /// Creates a new emitting task builder with default settings (internal)
-fn emitting_builder<T: Clone + Send + Sync + 'static, C: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static + From<sweet_async_api::AsyncTaskError>, I: TaskId>() -> TokioEmittingTaskBuilder<T, C, E, I> {
+fn emitting_builder<T: Clone + Send + 'static, C: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static + From<sweet_async_api::AsyncTaskError>, I: TaskId>() -> TokioEmittingTaskBuilder<T, C, E, I> {
     // Use the builder's own new() method which handles setup properly
     TokioEmittingTaskBuilder::new()
 }
 
 /// Creates a new orchestrator with default settings (internal)
-fn orchestrator<T: Clone + Send + Sync + 'static, I: TaskId + Clone + Copy + Eq + Hash + Send + 'static>() -> TokioOrchestrator<T, I> {
+fn orchestrator<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static>() -> TokioOrchestrator<T, I> {
     TokioOrchestrator::<T, I>::new(TokioRuntime::new())
 }
 
@@ -85,7 +88,7 @@ where
     I: TaskId,
 {
     /// Create a new orchestrator builder for spawning tasks (internal)
-    fn new_spawning() -> Self {
+    pub fn new_spawning() -> Self {
         let runtime = Handle::current();
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
 
@@ -103,7 +106,7 @@ where
     }
 
     /// Create a new orchestrator builder for emitting tasks (internal)
-    fn new_emitting() -> Self {
+    pub fn new_emitting() -> Self {
         let runtime = Handle::current();
         let active_tasks = Arc::new(Mutex::new(Vec::new()));
 
@@ -284,9 +287,9 @@ where
 impl<T, Task, I> sweet_async_api::task::builder::AsyncTaskBuilder
     for DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
     Task: AsyncTask<T, I>,
-    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static,
 {
     fn new() -> Self {
         // Default to spawning
@@ -439,8 +442,8 @@ where
 impl<T, I> sweet_async_api::task::spawn::SpawningTaskBuilder<T, AsyncTaskError, I>
     for DefaultOrchestratorBuilder<T, crate::task::async_task::TokioAsyncTask<T, I>, I>
 where
-    T: Clone + Send + Sync + 'static,
-    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static + Default,
+    T: Clone + Send + Sync + Unpin + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static + Default,
 {
     type Task = crate::task::spawn::spawning_task::TokioSpawningTask<T, I>;
     type ParentType = crate::orchestra::TokioOrchestrator<T, I>;
@@ -528,8 +531,11 @@ where
                 // This should never happen in well-typed code, but handle gracefully
                 tracing::error!("Invalid operation: run() called on emitting task builder");
                 // Return a failed task using the same builder pattern for consistency
-                let error_work = move || async {
-                    Err(AsyncTaskError::InvalidState("Cannot call run() on emitting task builder".to_string()))
+                let error_work = || async move {
+                    // Return a Future that resolves to a Future that resolves to a Result
+                    async move {
+                        Err::<T, AsyncTaskError>(AsyncTaskError::InvalidState("Cannot call run() on emitting task builder".to_string()))
+                    }
                 };
                 let builder = crate::task::spawn::builder::TokioSpawningTaskBuilder::new();
                 builder.run(error_work)
@@ -605,12 +611,12 @@ where
 // Implement emitting task methods directly on DefaultOrchestratorBuilder
 impl<T, Task, I> DefaultOrchestratorBuilder<T, Task, I>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + Unpin + 'static,
     Task: AsyncTask<T, I>,
-    I: TaskId + Clone + Copy + Eq + Hash + Send + 'static,
+    I: TaskId + Clone + Copy + Eq + Hash + Send + Unpin + 'static + Default,
 {
     /// Start the sender phase for emitting tasks (internal)
-    fn sender<F>(self, strategy: SenderStrategy, work: F) -> TokioEmittingTaskBuilder<T, (), AsyncTaskError, I>
+    fn sender<F>(self, sender: F, strategy: SenderStrategy) -> crate::task::emit::channel_builder::ChannelSenderBuilder<T, (), AsyncTaskError, I>
     where
         F: AsyncWork<T> + Send + 'static,
     {
@@ -626,7 +632,7 @@ where
                 ..
             } => {
                 // Create default orchestrator automatically
-                let _orchestrator = TokioOrchestrator::new(crate::orchestra::runtime::TokioRuntime::new());
+                let _orchestrator: TokioOrchestrator<T, I> = TokioOrchestrator::new(crate::orchestra::runtime::TokioRuntime::new());
                 
                 // Use the builder's new() method since the types don't match
                 let mut builder = TokioEmittingTaskBuilder::new();
@@ -641,14 +647,21 @@ where
                     builder = builder.name(&n);
                 }
                 // Configure sender strategy and work for full API ergonomics
-                builder = builder.sender(work, strategy);
-                builder
+                builder.sender(sender, strategy)
             }
             Self::Spawning { .. } => {
-                // Return an error emitting task builder
+                // Return an error channel sender builder
                 tracing::error!("Invalid operation: sender() called on spawning task builder");
-                // Create a dummy emitting builder that will fail on build
-                crate::task::emit::TokioEmittingTaskBuilder::new()
+                // Create a dummy channel sender builder that will fail on build
+                crate::task::emit::channel_builder::ChannelSenderBuilder {
+                    parent: crate::task::emit::TokioEmittingTaskBuilder::new(),
+                    sender_work: None,
+                    sender_logic: None,
+                    sender_strategy: strategy,
+                    dependencies: std::collections::HashMap::new(),
+                    batch_size: None,
+                    _marker: std::marker::PhantomData,
+                }
             }
         }
     }

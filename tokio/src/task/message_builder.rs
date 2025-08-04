@@ -1,12 +1,12 @@
 //! Message builder implementation for inter-task communication
 
 use std::collections::HashMap;
-use std::sync::Arc;
+
 use serde_json::Value;
 use sweet_async_api::task::{TaskMessageBuilder, TaskId, TaskStatus, AsyncTaskError};
 use sweet_async_api::task::task_communication::{TaskEnvelope, TaskMessage};
 
-#[cfg(feature = "cryypt")]
+#[cfg(feature = "cryypt_cipher")]
 use cryypt_cipher::Cipher;
 
 /// Tokio-specific message builder that implements TaskMessageBuilder
@@ -17,7 +17,7 @@ pub struct TokioMessageBuilder<T: Clone + Send + 'static, I: TaskId> {
     /// Correlation ID for distributed tracing
     correlation_id: Option<String>,
     /// Cipher for encryption
-    #[cfg(feature = "cryypt")]
+    #[cfg(feature = "cryypt_cipher")]
     cipher: Option<Arc<Cipher>>,
     /// Whether to encrypt the message
     encrypt: bool,
@@ -41,7 +41,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioMessageBuilder<T, I> {
         Self {
             hostname: None,
             correlation_id: None,
-            #[cfg(feature = "cryypt")]
+            #[cfg(feature = "cryypt_cipher")]
             cipher: None,
             encrypt: false,
             sender_id,
@@ -60,7 +60,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioMessageBuilder<T, I> {
         Self {
             hostname: Some(hostname),
             correlation_id: None,
-            #[cfg(feature = "cryypt")]
+            #[cfg(feature = "cryypt_cipher")]
             cipher: None,
             encrypt: false,
             sender_id,
@@ -158,7 +158,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TaskMessageBuilder<T, I> for TokioMes
     }
 
     /// Set the cipher for encryption
-    #[cfg(feature = "cryypt")]
+    #[cfg(feature = "cryypt_cipher")]
     fn cipher(mut self, cipher: Arc<Cipher>) -> Self {
         self.cipher = Some(cipher);
         self

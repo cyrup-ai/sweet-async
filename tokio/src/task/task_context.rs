@@ -11,7 +11,7 @@ use crate::task::relationships::TokioTaskRelationships;
 
 /// Tokio-specific task context that implements ContextualizedTask
 #[derive(Debug, Clone)]
-pub struct TokioTaskContext<T: Clone + Send + Sync + 'static, I: TaskId> {
+pub struct TokioTaskContext<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> {
     /// Task data storage
     data: Arc<RwLock<HashMap<String, Value>>>,
     /// Task metadata storage
@@ -24,7 +24,7 @@ pub struct TokioTaskContext<T: Clone + Send + Sync + 'static, I: TaskId> {
     working_directory: PathBuf,
 }
 
-impl<T: Clone + Send + Sync + 'static, I: TaskId> TokioTaskContext<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> TokioTaskContext<T, I> {
     /// Create a new task context with default values
     pub fn new() -> Self {
         Self {
@@ -74,14 +74,14 @@ impl<T: Clone + Send + Sync + 'static, I: TaskId> TokioTaskContext<T, I> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, I: TaskId> Default for TokioTaskContext<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> Default for TokioTaskContext<T, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 /// Implementation of ContextualizedTask trait for TokioTaskContext
-impl<T: Clone + Send + Sync + 'static, I: TaskId> ContextualizedTask<T, I> for TokioTaskContext<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> ContextualizedTask<T, I> for TokioTaskContext<T, I> {
     type RuntimeType = TokioRuntime;
     type RelationshipsType = TokioTaskRelationships<T, I>;
 
@@ -106,7 +106,7 @@ impl<T: Clone + Send + Sync + 'static, I: TaskId> ContextualizedTask<T, I> for T
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, I: TaskId> TokioTaskContext<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> TokioTaskContext<T, I> {
     /// Set the working directory for this task context
     pub fn set_working_directory(&mut self, path: PathBuf) {
         self.working_directory = path;

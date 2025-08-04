@@ -9,13 +9,13 @@ use sweet_async_api::task::TaskId;
 use super::runtime_trait::TokioRuntime;
 
 /// Tokio implementation of RuntimeBuilder trait
-pub struct TokioRuntimeBuilder<T: Clone + Send + 'static, I: TaskId> {
+pub struct TokioRuntimeBuilder<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> {
     worker_threads: Option<usize>,
     stack_size: Option<usize>,
     _phantom: std::marker::PhantomData<(T, I)>,
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> RuntimeBuilder<T, I> for TokioRuntimeBuilder<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> RuntimeBuilder<T, I> for TokioRuntimeBuilder<T, I> {
     fn new() -> Self {
         Self {
             worker_threads: None,

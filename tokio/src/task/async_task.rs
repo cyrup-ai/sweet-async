@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::pin::pin;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -20,7 +20,7 @@ use sweet_async_api::task::{
 use crate::task::TaskMetrics;
 use uuid::Uuid;
 
-use crate::orchestra::TokioOrchestratorBuilder;
+
 use crate::orchestra::runtime::TokioRuntime;
 
 // Metrics structs (retained and refined from previous version)
@@ -225,11 +225,8 @@ pub struct TokioAsyncTask<T: Clone + Send + 'static, I: TaskId> {
     current_retry: AtomicU8,
     retry_strategy: RetryStrategy,
     fallback_work: crate::task::error_fallback::ErrorFallback<T>,
-    cancellation_callbacks: Arc<
-        tokio::sync::Mutex<
-            Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
-        >,
-    >,
+    // Immutable callback properties - NO Arc<Mutex<Vec<>>> pattern
+    on_cancel_callback: Option<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>>,
     relationships: (),
     // Sophisticated cancellation state management
     cancellation_level: AtomicU8,
@@ -241,7 +238,7 @@ pub struct TokioAsyncTask<T: Clone + Send + 'static, I: TaskId> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
+impl<T: Clone + Send + Sync + Unpin + 'static, I: TaskId + Unpin> TokioAsyncTask<T, I> {
     fn new(id: I) -> Self {
         let now = SystemTime::now();
         Self {
@@ -272,7 +269,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
                 max: Duration::from_secs(30),
             },
             fallback_work: crate::task::error_fallback::ErrorFallback::new(),
-            cancellation_callbacks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            on_cancel_callback: None, // No callback initially
             relationships: (),
             // Initialize sophisticated cancellation state
             cancellation_level: AtomicU8::new(0), // No cancellation initially
@@ -307,7 +304,7 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
         self
     }
 
-    fn task_id(&self) -> I {
+    pub fn task_id(&self) -> I {
         self.id
     }
 
@@ -364,15 +361,11 @@ impl<T: Clone + Send + 'static, I: TaskId> TokioAsyncTask<T, I> {
     }
 
     async fn execute_cancellation_callbacks(&self) {
-        let mut callbacks = self.cancellation_callbacks.lock().await;
-        let callback_futures: Vec<_> = std::mem::take(&mut *callbacks)
-            .into_iter()
-            .map(|callback| callback())
-            .collect();
-        drop(callbacks);
-        
-        // Execute all callbacks concurrently without manual spawning
-        futures::future::join_all(callback_futures).await;
+        // Execute the immutable callback property if present
+        if let Some(ref callback) = self.on_cancel_callback {
+            let future = callback();
+            tokio::spawn(future);
+        }
     }
 
     /// Escalate cancellation to a more aggressive level with zero allocation
@@ -394,15 +387,16 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
         level: CancellationLevel,
     ) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
-        let cancelled = self.cancelled.clone();
-        let status = self.status.clone();
-        let cancellation_level = self.cancellation_level.clone();
-        let cancellation_started = self.cancellation_started.clone();
-        let graceful_timeout_nanos = self.graceful_timeout_nanos.clone();
-        let kill_timeout_nanos = self.kill_timeout_nanos.clone();
-        let escalation_count = self.escalation_count.clone();
-        let cleanup_completed = self.cleanup_completed.clone();
-        let cancellation_callbacks = self.cancellation_callbacks.clone();
+        let cancelled = self.cancelled.load(Ordering::Relaxed);
+        let status = self.status.load(Ordering::Relaxed);
+        let cancellation_level = self.cancellation_level.load(Ordering::Relaxed);
+        let cancellation_started = self.cancellation_started.load(Ordering::Relaxed);
+        let graceful_timeout_nanos = self.graceful_timeout_nanos.load(Ordering::Relaxed);
+        let kill_timeout_nanos = self.kill_timeout_nanos.load(Ordering::Relaxed);
+        let escalation_count = self.escalation_count.load(Ordering::Relaxed);
+        let cleanup_completed = self.cleanup_completed.load(Ordering::Relaxed);
+        // Cannot clone callback since it's a trait object - get reference instead
+        let has_callback = self.on_cancel_callback.is_some();
 
         async move {
             // Record cancellation initiation with zero-allocation timestamp
@@ -411,87 +405,60 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64;
             
-            cancellation_started.store(start_time, Ordering::Relaxed);
-            cancellation_level.store(level as u8, Ordering::Relaxed);
+            self.cancellation_started.store(start_time, Ordering::Relaxed);
+            self.cancellation_level.store(level as u8, Ordering::Relaxed);
             
             // Transition to pending cancellation state atomically
-            status.store(TaskStatus::PendingCancellation as u8, Ordering::Relaxed);
+            self.status.store(TaskStatus::PendingCancellation as u8, Ordering::Relaxed);
             
             match level {
                 CancellationLevel::Graceful => {
                     // Set cancellation flag to signal graceful shutdown
-                    cancelled.store(true, Ordering::Relaxed);
+                    self.cancelled.store(true, Ordering::Relaxed);
                     token.cancel();
                     
-                    // Execute all cancellation callbacks asynchronously
-                    let callbacks_lock = match cancellation_callbacks.try_lock() {
-                        Ok(callbacks_guard) => {
-                            let callback_futures: Vec<_> = callbacks_guard
-                                .iter()
-                                .map(|callback| callback())
-                                .collect();
-                            drop(callbacks_guard);
-                            
-                            // Execute all callbacks concurrently with timeout
-                            let graceful_timeout_duration = Duration::from_nanos(
-                                graceful_timeout_nanos.load(Ordering::Relaxed)
-                            );
-                            
-                            match tokio::time::timeout(graceful_timeout_duration, 
-                                futures::future::join_all(callback_futures)).await {
-                                Ok(_) => {
-                                    cleanup_completed.store(true, Ordering::Relaxed);
-                                }
-                                Err(_) => {
-                                    // Graceful timeout exceeded, escalate automatically
-                                    escalation_count.fetch_add(1, Ordering::Relaxed);
-                                    return self.escalate_cancellation(CancellationLevel::Kill).await;
-                                }
+                    // Execute cancellation callback if present
+                    if let Some(ref callback) = self.on_cancel_callback {
+                        let future = callback();
+                        let graceful_timeout_duration = Duration::from_nanos(
+                            graceful_timeout_nanos
+                        );
+                        
+                        match tokio::time::timeout(graceful_timeout_duration, future).await {
+                            Ok(_) => {
+                                self.cleanup_completed.store(true, Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                // Graceful timeout exceeded, escalate automatically
+                                self.escalation_count.fetch_add(1, Ordering::Relaxed);
+                                return self.escalate_cancellation(CancellationLevel::Kill).await;
                             }
                         }
-                        Err(_) => {
-                            // Callbacks mutex contended, execute async cleanup directly
-                            let callbacks_arc = cancellation_callbacks.clone();
-                            let cleanup_flag = cleanup_completed.clone();
-                            let timeout_nanos = graceful_timeout_nanos.load(Ordering::Relaxed);
-                            
-                            // Execute cleanup directly without spawning
-                            {
-                                let callbacks_guard = callbacks_arc.lock().await;
-                                let callback_futures: Vec<_> = callbacks_guard
-                                    .iter()
-                                    .map(|callback| callback())
-                                    .collect();
-                                drop(callbacks_guard);
-                                
-                                let timeout_duration = Duration::from_nanos(timeout_nanos);
-                                if tokio::time::timeout(timeout_duration, 
-                                    futures::future::join_all(callback_futures)).await.is_ok() {
-                                    cleanup_flag.store(true, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                    };
+                    } else {
+                        // No callback, mark cleanup as completed immediately
+                        self.cleanup_completed.store(true, Ordering::Relaxed);
+                    }
+                        // No error case needed - already handled above
                 }
                 
                 CancellationLevel::Kill => {
                     // More urgent cancellation with limited cleanup window
-                    cancelled.store(true, Ordering::Relaxed);
+                    self.cancelled.store(true, Ordering::Relaxed);
                     token.cancel();
                     
                     // Execute only essential cleanup with strict timeout
                     let kill_timeout_duration = Duration::from_nanos(
-                        kill_timeout_nanos.load(Ordering::Relaxed)
+                        self.kill_timeout_nanos.load(Ordering::Relaxed)
                     );
                     
                     let essential_cleanup = async {
-                        // Execute highest priority callbacks only
-                        if let Ok(callbacks_guard) = cancellation_callbacks.try_lock() {
-                            if let Some(first_callback) = callbacks_guard.first() {
-                                first_callback().await;
-                            }
+                        // Execute callback if present (minimal cleanup mode)
+                        if let Some(ref callback) = self.on_cancel_callback {
+                            let future = callback();
+                            // Don't wait for callback in kill mode
+                            tokio::spawn(future);
                         }
-                        cleanup_completed.store(true, Ordering::Relaxed);
+                        self.cleanup_completed.store(true, Ordering::Relaxed);
                     };
                     
                     match tokio::time::timeout(kill_timeout_duration, essential_cleanup).await {
@@ -500,7 +467,7 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                         }
                         Err(_) => {
                             // Kill timeout exceeded, escalate to hard termination
-                            escalation_count.fetch_add(1, Ordering::Relaxed);
+                            self.escalation_count.fetch_add(1, Ordering::Relaxed);
                             return self.escalate_cancellation(CancellationLevel::KillHard).await;
                         }
                     }
@@ -508,17 +475,17 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
                 
                 CancellationLevel::KillHard => {
                     // Immediate termination with no cleanup
-                    cancelled.store(true, Ordering::Relaxed);
+                    self.cancelled.store(true, Ordering::Relaxed);
                     token.cancel();
                     
                     // No cleanup operations allowed - immediate termination
-                    escalation_count.fetch_add(1, Ordering::Relaxed);
-                    cleanup_completed.store(false, Ordering::Relaxed); // No cleanup performed
+                    self.escalation_count.fetch_add(1, Ordering::Relaxed);
+                    self.cleanup_completed.store(false, Ordering::Relaxed); // No cleanup performed
                 }
             }
             
             // Transition to final cancelled state
-            status.store(TaskStatus::Cancelled as u8, Ordering::Relaxed);
+            self.status.store(TaskStatus::Cancelled as u8, Ordering::Relaxed);
             
             Ok(())
         }
@@ -552,30 +519,55 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
         self.cancelled.load(Ordering::Relaxed)
     }
 
-    fn on_cancel<F, Fut>(&self, callback: F)
+    fn on_cancel<F, Fut>(self, callback: F) -> Self
     where
         F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        // Handle mutex access with production-grade error handling
-        // Tokio's TryLockError is more elegant - it only indicates the lock is held
-        match self.cancellation_callbacks.try_lock() {
-            Ok(mut callbacks) => {
-                callbacks.push(Box::new(move || Box::pin(callback.run())));
-            }
-            Err(_) => {
-                tracing::debug!(
-                    "Cancellation callbacks mutex contended, using blocking wait for registration"
-                );
-
-                // Use blocking wait to acquire lock and register callback
-                // This is safer than spawning and ensures callback is registered immediately
-                let mut callbacks = self.cancellation_callbacks.blocking_lock();
-                callbacks.push(Box::new(move || Box::pin(callback.run())));
-            }
+        // Immutable builder pattern: return new instance with callback property
+        let callback_wrapper = Box::new(move || {
+            Box::pin(async move {
+                let fut = callback.run().await;
+                fut.await
+            })
+        });
+        
+        Self {
+            id: self.id,
+            name: self.name,
+            priority: self.priority,
+            status: AtomicU8::new(self.status.load(Ordering::Relaxed)),
+            cancel_token: self.cancel_token,
+            cancelled: AtomicBool::new(self.cancelled.load(Ordering::Relaxed)),
+            created_at: self.created_at,
+            created_timestamp: self.created_timestamp,
+            executed_timestamp: AtomicU64::new(self.executed_timestamp.load(Ordering::Relaxed)),
+            completed_timestamp: AtomicU64::new(self.completed_timestamp.load(Ordering::Relaxed)),
+            timeout_duration: self.timeout_duration,
+            retry_count: AtomicU32::new(self.retry_count.load(Ordering::Relaxed)),
+            cpu_usage: self.cpu_usage,
+            memory_usage: self.memory_usage,
+            io_operations: self.io_operations,
+            tracing_enabled: AtomicBool::new(self.tracing_enabled.load(Ordering::Relaxed)),
+            error_count: AtomicU64::new(self.error_count.load(Ordering::Relaxed)),
+            runtime_handle: self.runtime_handle,
+            max_retries: self.max_retries,
+            current_retry: AtomicU8::new(self.current_retry.load(Ordering::Relaxed)),
+            retry_strategy: self.retry_strategy,
+            metrics: self.metrics,
+            fallback_work: self.fallback_work,
+            on_cancel_callback: Some(callback_wrapper),
+            relationships: self.relationships,
+            cancellation_level: AtomicU8::new(self.cancellation_level.load(Ordering::Relaxed)),
+            cancellation_started: AtomicU64::new(self.cancellation_started.load(Ordering::Relaxed)),
+            graceful_timeout_nanos: AtomicU64::new(self.graceful_timeout_nanos.load(Ordering::Relaxed)),
+            kill_timeout_nanos: AtomicU64::new(self.kill_timeout_nanos.load(Ordering::Relaxed)),
+            escalation_count: AtomicU8::new(self.escalation_count.load(Ordering::Relaxed)),
+            cleanup_completed: AtomicBool::new(self.cleanup_completed.load(Ordering::Relaxed)),
+            _phantom: PhantomData,
         }
     }
-}
+} // Close CancellableTask impl
 
 impl<T: Clone + Send + 'static, I: TaskId> TracingTask<T> for TokioAsyncTask<T, I> {
     fn handle_error(&self, error: AsyncTaskError) -> Result<T, AsyncTaskError> {
@@ -643,7 +635,7 @@ impl<T: Clone + Send + 'static, I: TaskId> RecoverableTask<T> for TokioAsyncTask
         let fallback_work = self.fallback_work.clone();
         let mut current_retry = self.current_retry.load(std::sync::atomic::Ordering::Relaxed);
         let retry_strategy = self.retry_strategy;
-        let max_retries = self.max_retries;
+        let _max_retries = self.max_retries;
         
         async move {
             let mut attempts = 0;
@@ -786,7 +778,7 @@ impl<T: Clone + Send + 'static, I: TaskId> AsyncTask<T, I> for TokioAsyncTask<T,
     fn emits<R: Clone + Send + 'static, Task: AsyncTask<R, I>>()
     -> impl OrchestratorBuilder<R, Task, I> {
         use crate::task::emit::channel_builder::TokioEmittingTaskBuilder;
-        TokioEmittingTaskBuilder::<R, R, sweet_async_api::task::AsyncTaskError, I>::new()
+        TokioEmittingTaskBuilder::<R, (), sweet_async_api::task::AsyncTaskError, I>::new()
     }
 } // Close the impl block properly
 
@@ -816,7 +808,11 @@ impl<T: Clone + Send + 'static, I: TaskId> Clone for TokioAsyncTask<T, I> {
             retry_strategy: self.retry_strategy,
             metrics: self.metrics.clone(),
             fallback_work: crate::task::error_fallback::ErrorFallback::new(),
-            cancellation_callbacks: self.cancellation_callbacks.clone(),
+            on_cancel_callback: self.on_cancel_callback.as_ref().map(|cb| {
+                // Since callbacks are immutable properties, we can't clone Fn traits
+                // Create a new None callback for the clone
+                None as Option<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>>
+            }).flatten(),
             relationships: self.relationships,
             // Clone sophisticated cancellation state
             cancellation_level: AtomicU8::new(self.cancellation_level.load(Ordering::Relaxed)),
@@ -835,34 +831,25 @@ impl<T: Clone + Send + 'static, I: TaskId> std::future::IntoFuture for TokioAsyn
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + 'static>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let timeout_duration = self.timeout_duration;
-        let max_retries = self.max_retries;
-        let retry_strategy = self.retry_strategy;
-        let fallback_work = self.fallback_work.clone();
-        let error_count = self.error_count.clone();
-        let current_retry = self.current_retry.clone();
-        let status = self.status.clone();
-        let completed_timestamp = self.completed_timestamp.clone();
-        let executed_timestamp = self.executed_timestamp.clone();
-        let cancelled = self.cancelled.clone();
-        
         Box::pin(async move {
+            let timeout_duration = self.timeout_duration;
+            let max_retries = self.max_retries;
             // Mark started
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64;
-            executed_timestamp.store(now, Ordering::Relaxed);
-            status.store(TaskStatus::Running as u8, Ordering::Relaxed);
+            self.executed_timestamp.store(now, Ordering::Relaxed);
+            self.status.store(TaskStatus::Running as u8, Ordering::Relaxed);
             
             // Check if task is already cancelled
-            if cancelled.load(Ordering::Relaxed) {
+            if self.cancelled.load(Ordering::Relaxed) {
                 let now = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or(Duration::ZERO)
                     .as_nanos() as u64;
-                completed_timestamp.store(now, Ordering::Relaxed);
-                status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
+                self.completed_timestamp.store(now, Ordering::Relaxed);
+                self.status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
                 return Err(AsyncTaskError::Cancelled);
             }
 
@@ -875,30 +862,30 @@ impl<T: Clone + Send + 'static, I: TaskId> std::future::IntoFuture for TokioAsyn
                 loop {
                     attempts += 1;
                     
-                    match fallback_work.run().await {
+                    match self.fallback_work.clone().run().await {
                         Ok(value) => {
                             let now = SystemTime::now()
                                 .duration_since(SystemTime::UNIX_EPOCH)
                                 .unwrap_or(Duration::ZERO)
                                 .as_nanos() as u64;
-                            completed_timestamp.store(now, Ordering::Relaxed);
-                            status.store(TaskStatus::Completed as u8, Ordering::Relaxed);
+                            self.completed_timestamp.store(now, Ordering::Relaxed);
+                            self.status.store(TaskStatus::Completed as u8, Ordering::Relaxed);
                             return Ok(value);
                         },
                         Err(error) => {
                             if attempts >= max_attempts {
-                                error_count.fetch_add(1, Ordering::Relaxed);
+                                self.error_count.fetch_add(1, Ordering::Relaxed);
                                 let now = SystemTime::now()
                                     .duration_since(SystemTime::UNIX_EPOCH)
                                     .unwrap_or(Duration::ZERO)
                                     .as_nanos() as u64;
-                                completed_timestamp.store(now, Ordering::Relaxed);
-                                status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
+                                self.completed_timestamp.store(now, Ordering::Relaxed);
+                                self.status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
                                 return Err(error);
                             }
                             
                             // Calculate retry delay based on strategy
-                            let delay = match retry_strategy {
+                            let delay = match self.retry_strategy {
                                 RetryStrategy::Exponential { base, factor, max } => {
                                     let calculated = base.as_millis() as f64 * factor.powi((attempts - 1) as i32);
                                     Duration::from_millis(calculated.min(max.as_millis() as f64) as u64)
@@ -914,7 +901,7 @@ impl<T: Clone + Send + 'static, I: TaskId> std::future::IntoFuture for TokioAsyn
                                 tokio::time::sleep(delay).await;
                             }
                             
-                            current_retry.store(attempts as u8, Ordering::Relaxed);
+                            self.current_retry.store(attempts as u8, Ordering::Relaxed);
                         }
                     }
                 }
@@ -927,8 +914,8 @@ impl<T: Clone + Send + 'static, I: TaskId> std::future::IntoFuture for TokioAsyn
                         .duration_since(SystemTime::UNIX_EPOCH)
                         .unwrap_or(Duration::ZERO)
                         .as_nanos() as u64;
-                    completed_timestamp.store(now, Ordering::Relaxed);
-                    status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
+                    self.completed_timestamp.store(now, Ordering::Relaxed);
+                    self.status.store(TaskStatus::Failed as u8, Ordering::Relaxed);
                     Err(AsyncTaskError::Timeout(timeout_duration))
                 }
             }

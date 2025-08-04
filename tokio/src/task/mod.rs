@@ -54,8 +54,9 @@ pub use task_communication::*;
 pub use task_context::*;
 pub use task_id::*;
 pub use task_metrics::*;
-pub use relationships::*;
-pub use task_relationships::*;
+pub use relationships::TokioTaskRelationships;
+pub use task_relationships::TaskRelationshipManager;
+
 pub use timed_task::*;
 pub use tracing_task::*;
 pub use tokio_task::*;

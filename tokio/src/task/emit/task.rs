@@ -10,7 +10,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use tokio::runtime::Handle;
@@ -20,25 +20,21 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use sweet_async_api::orchestra::OrchestratorError;
-use sweet_async_api::task::builder::{ReceiverStrategy, SenderStrategy};
-use sweet_async_api::task::emit::{EmittingTask, FinalEvent, ReceiverTask, SenderTask};
+use sweet_async_api::task::builder::ReceiverStrategy;
+use sweet_async_api::task::emit::{EmittingTask, ReceiverTask, SenderTask};
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
 
 use crate::task::async_task::TokioAsyncTask;
 use crate::task::emit::TokioFinalEvent;
+use crate::task::emit::event::TokioEvent;
 use crate::task::relationships::TokioTaskRelationships;
 
 /// Tokio implementation of SenderTask trait
 ///
 /// This struct manages the sending side of event-based tasks, providing efficient
 /// event production with configurable strategies (serial/parallel).
-pub struct TokioSenderTask<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId,
-> {
+pub struct TokioSenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     /// Task identifier
     id: I,
 
@@ -64,12 +60,7 @@ pub struct TokioSenderTask<
     _phantom: PhantomData<(C, E)>,
 }
 
-impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId,
-> TokioSenderTask<T, C, E, I>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> TokioSenderTask<T, C, E, I>
 {
     /// Create a new TokioSenderTask
     pub fn new(id: I, runtime: Handle) -> Self {
@@ -115,12 +106,7 @@ impl<
 ///
 /// This struct manages the receiving side of event-based tasks, processing events
 /// with configurable strategies and collecting results.
-pub struct TokioReceiverTask<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId,
-> {
+pub struct TokioReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     /// Task identifier
     id: I,
 
@@ -147,9 +133,9 @@ pub struct TokioReceiverTask<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > TokioReceiverTask<T, C, E, I>
 {
@@ -183,12 +169,7 @@ impl<
 ///
 /// This struct represents a complete event-emitting task that combines sending
 /// and receiving capabilities with final result collection.
-pub struct TokioEmittingTask<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    I: TaskId,
-> {
+pub struct TokioEmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> {
     /// Task identifier
     id: I,
 
@@ -208,7 +189,7 @@ pub struct TokioEmittingTask<
     cancel_token: CancellationToken,
 
     /// Task completion flag
-    is_complete: AtomicBool,
+    is_complete: Arc<AtomicBool>,
 
     /// Task creation timestamp
     created_at: Instant,
@@ -243,12 +224,8 @@ pub struct TokioEmittingTask<
     /// Retry attempt counter
     retry_count: std::sync::atomic::AtomicU32,
 
-    /// Cancellation callbacks to execute when task is cancelled
-    cancellation_callbacks: Arc<
-        tokio::sync::Mutex<
-            Vec<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
-        >,
-    >,
+    /// Immutable cancellation callback property
+    on_cancel_callback: Option<Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>>,
 
     /// Fallback work for recovery operations
     fallback_work: Box<
@@ -268,9 +245,9 @@ pub struct TokioEmittingTask<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > TokioEmittingTask<T, C, E, I>
 {
@@ -284,7 +261,7 @@ impl<
             pipeline_handle: None,
             result_rx: None,
             cancel_token: CancellationToken::new(),
-            is_complete: AtomicBool::new(false),
+            is_complete: Arc::new(AtomicBool::new(false)),
             created_at: Instant::now(),
             created_timestamp: now_system,
             executed_timestamp: AtomicU64::new(0), // 0 means not executed yet
@@ -296,7 +273,7 @@ impl<
             memory_metrics: crate::task::memory_usage::TokioMemoryUsage::new(),
             io_metrics: crate::task::io_usage::TokioIoUsage::new(),
             retry_count: AtomicU32::new(0),
-            cancellation_callbacks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            on_cancel_callback: None,
             fallback_work: Box::new(|| {
                 Box::new(Box::pin(async {
                     Err(AsyncTaskError::Failure("EmittingTask has no recoverable fallback - task must complete successfully".to_string()))
@@ -370,25 +347,19 @@ impl<
             .compare_exchange(0, execution_nanos, Ordering::Relaxed, Ordering::Relaxed)
             .ok(); // Ignore if already set
 
-        // If we already have collected results, return them
-        if let Some(ref results) = self.collected_results {
-            return results.clone();
+        // If we already have collected results, take them (can only be called once)
+        if let Some(results) = self.collected_results.take() {
+            return results;
         }
 
         let results = if let Some(rx) = self.result_rx.take() {
             match rx.await {
-                Ok(results) => {
-                    self.collected_results = Some(results.clone());
-                    results
-                }
+                Ok(results) => results,
                 Err(_) => {
                     // Receiver dropped, try pipeline handle
                     if let Some(handle) = self.pipeline_handle.take() {
                         match handle.await {
-                            Ok(Ok(results)) => {
-                                self.collected_results = Some(results.clone());
-                                results
-                            }
+                            Ok(Ok(results)) => results,
                             Ok(Err(_)) | Err(_) => {
                                 // Pipeline failed, return empty results
                                 HashMap::new()
@@ -401,10 +372,7 @@ impl<
             }
         } else if let Some(handle) = self.pipeline_handle.take() {
             match handle.await {
-                Ok(Ok(results)) => {
-                    self.collected_results = Some(results.clone());
-                    results
-                }
+                Ok(Ok(results)) => results,
                 Ok(Err(_)) | Err(_) => HashMap::new(),
             }
         } else {
@@ -427,9 +395,9 @@ impl<
 
 // Implement SenderTask trait for TokioSenderTask
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static + From<sweet_async_api::AsyncTaskError>,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static + From<sweet_async_api::AsyncTaskError>,
     I: TaskId,
 > SenderTask<T, C, E, I> for TokioSenderTask<T, C, E, I>
 {
@@ -437,7 +405,7 @@ impl<
 
     fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
     where
-        F: Fn(/* ... */) -> R + Send + 'static,
+        F: Fn() -> R + Send + 'static,
         R: IntoAsyncResult<C, E> + Send + 'static,
     {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -472,7 +440,7 @@ impl<
                         match timeout_duration {
                             Some(timeout) => {
                                 match tokio::time::timeout(timeout, async move {
-                                    let result = receiver_clone(event);
+                                    let result = (*receiver_clone)(event);
                                     result.into_async_result().await
                                 }).await {
                                     Ok(Ok(result)) => {
@@ -498,7 +466,7 @@ impl<
                             None => {
                                 // Process without timeout
                                 let receiver_clone = Arc::clone(&receiver_fn);
-                                match receiver_clone(event).into_async_result().await {
+                                match (*receiver_clone)(event).into_async_result().await {
                                     Ok(result) => {
                                         results.insert(event_id, Ok(result));
                                     }
@@ -511,7 +479,7 @@ impl<
                     }
                 }
                 ReceiverStrategy::Parallel { workers, .. } => {
-                    let semaphore = Arc::new(Semaphore::new(workers.0.max(1)));
+                    let semaphore = Arc::new(Semaphore::new(workers.max(1)));
                     let results_map = Arc::new(dashmap::DashMap::new());
                     let mut handles = Vec::new();
 
@@ -534,7 +502,7 @@ impl<
                             let event_id = Uuid::new_v4();
 
                             // Process event with the actual receiver function
-                            match receiver_clone(event).into_async_result().await {
+                            match (*receiver_clone)(event).into_async_result().await {
                                 Ok(result) => {
                                     results_clone.insert(event_id, Ok(result));
                                 }
@@ -561,8 +529,9 @@ impl<
             }
 
             // Send results back
-            let _ = result_tx.send(results.clone());
-            Ok(results)
+            let results_copy = HashMap::new(); // Create empty results for return
+            let _ = result_tx.send(results);
+            Ok(results_copy)
         });
 
         TokioEmittingTask::new(task_id, runtime)
@@ -573,9 +542,9 @@ impl<
 
 // Implement ReceiverTask trait for TokioReceiverTask
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > ReceiverTask<T, C, E, I> for TokioReceiverTask<T, C, E, I>
 {
@@ -595,8 +564,9 @@ impl<
         // Spawn a task that immediately completes with empty results
         let pipeline_handle = runtime.spawn(async move {
             let results = HashMap::new();
-            let _ = result_tx.send(results.clone());
-            Ok(results)
+            let results_copy = HashMap::new();
+            let _ = result_tx.send(results);
+            Ok(results_copy)
         });
 
         TokioEmittingTask::new(task_id, runtime)
@@ -607,9 +577,9 @@ impl<
 
 // Implement AsyncTask trait for TokioEmittingTask (required by EmittingTask)
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > AsyncTask<T, I> for TokioEmittingTask<T, C, E, I>
 {
@@ -628,13 +598,13 @@ impl<
 
 // Implement EmittingTask trait for TokioEmittingTask
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > EmittingTask<T, C, E, I> for TokioEmittingTask<T, C, E, I>
 {
-    type Final = TokioFinalEvent<T, C, E, I>;
+    type Final = TokioFinalEvent<T, C, C, I>;
 
     fn is_complete(&self) -> bool {
         self.is_complete.load(Ordering::Relaxed)
@@ -668,15 +638,15 @@ impl<
 // These implementations delegate to the corresponding TokioAsyncTask implementations
 
 use sweet_async_api::task::{
-    CancellableTask, CancellationLevel, ContextualizedTask, CpuUsage, IoUsage, MemoryUsage,
+    CancellableTask, CancellationLevel, ContextualizedTask,
     MetricsEnabledTask, NamedTask, PrioritizedTask, RecoverableTask, RetryStrategy,
     StatusEnabledTask, TaskStatus, TimedTask, TracingTask,
 };
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > PrioritizedTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -686,9 +656,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > CancellableTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -697,28 +667,38 @@ impl<
         level: CancellationLevel,
     ) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
-        let callbacks_executor = self.execute_cancellation_callbacks();
+        let is_complete = self.is_complete.clone();
+        
+        // Extract cancellation callbacks without capturing self
+        let callbacks = match self.cancellation_callbacks.try_lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(_) => Vec::new(),
+        };
 
         async move {
             match level {
                 CancellationLevel::Graceful => {
                     // Request graceful cancellation
                     token.cancel();
-                    self.is_complete.store(true, Ordering::Relaxed);
+                    is_complete.store(true, Ordering::Relaxed);
                     // Execute callbacks for graceful cancellation
-                    callbacks_executor.await;
+                    for callback in &callbacks {
+                        let _ = callback().await;
+                    }
                 }
                 CancellationLevel::Kill => {
                     // Force immediate cancellation
                     token.cancel();
-                    self.is_complete.store(true, Ordering::SeqCst);
-                    // Execute callbacks quickly
-                    callbacks_executor.await;
+                    is_complete.store(true, Ordering::SeqCst);
+                    // Execute callbacks quickly  
+                    for callback in &callbacks {
+                        let _ = callback().await;
+                    }
                 }
                 CancellationLevel::KillHard => {
                     // Hard kill - immediate abort, skip callbacks
                     token.cancel();
-                    self.is_complete.store(true, Ordering::SeqCst);
+                    is_complete.store(true, Ordering::SeqCst);
                 }
             }
             Ok(())
@@ -727,35 +707,56 @@ impl<
 
     fn cancel_gracefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
-        let callbacks_executor = self.execute_cancellation_callbacks();
+        let is_complete = self.is_complete.clone();
+        
+        // Extract callbacks without capturing self
+        let callbacks = match self.cancellation_callbacks.try_lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(_) => Vec::new(),
+        };
 
         async move {
             token.cancel();
-            self.is_complete.store(true, Ordering::Relaxed);
+            is_complete.store(true, Ordering::Relaxed);
             // Execute callbacks for graceful cancellation
-            callbacks_executor.await;
+            if !callbacks.is_empty() {
+                for callback in &callbacks {
+                    let _ = callback().await;
+                }
+            }
             Ok(())
         }
     }
 
     fn cancel_forcefully(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
-        let callbacks_executor = self.execute_cancellation_callbacks();
+        let is_complete = self.is_complete.clone();
+        
+        // Extract callbacks without capturing self
+        let callbacks = match self.cancellation_callbacks.try_lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(_) => Vec::new(),
+        };
 
         async move {
             token.cancel();
-            self.is_complete.store(true, Ordering::SeqCst);
+            is_complete.store(true, Ordering::SeqCst);
             // Execute callbacks for forceful cancellation
-            callbacks_executor.await;
+            if !callbacks.is_empty() {
+                for callback in &callbacks {
+                    let _ = callback().await;
+                }
+            }
             Ok(())
         }
     }
 
     fn cancel_immediately(&self) -> impl Future<Output = Result<(), OrchestratorError>> + Send {
         let token = self.cancel_token.clone();
+        let is_complete = self.is_complete.clone();
         async move {
             token.cancel();
-            self.is_complete.store(true, Ordering::Relaxed);
+            is_complete.store(true, Ordering::Relaxed);
             Ok(())
         }
     }
@@ -764,26 +765,50 @@ impl<
         self.cancel_token.is_cancelled()
     }
 
-    fn on_cancel<F, Fut>(&self, callback: F)
+    fn on_cancel<F, Fut>(self, callback: F) -> Self
     where
         F: crate::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let callbacks = self.cancellation_callbacks.clone();
-
-        // Spawn a task to store the callback in the mutex
-        let runtime = self.runtime.clone();
-        runtime.spawn(async move {
-            let mut callbacks_guard = callbacks.lock().await;
-            callbacks_guard.push(Box::new(move || Box::pin(callback.run())));
+        // Immutable builder pattern: return new instance with callback property
+        let callback_wrapper = Box::new(move || {
+            Box::pin(async move {
+                let fut = callback.run().await;
+                fut.await
+            })
         });
+
+        Self {
+            id: self.id,
+            priority: self.priority,
+            runtime: self.runtime,
+            event_handle: self.event_handle,
+            sender_handle: self.sender_handle,
+            receiver_handle: self.receiver_handle,
+            created_at: self.created_at,
+            started_at: self.started_at,
+            completed_at: self.completed_at,
+            execution_time: self.execution_time,
+            last_activity: self.last_activity,
+            cancellation_token: self.cancellation_token,
+            is_cancelled: AtomicBool::new(self.is_cancelled.load(Ordering::Relaxed)),
+            status: AtomicU8::new(self.status.load(Ordering::Relaxed)),
+            error_count: AtomicU64::new(self.error_count.load(Ordering::Relaxed)),
+            cpu_metrics: self.cpu_metrics,
+            memory_metrics: self.memory_metrics,
+            io_metrics: self.io_metrics,
+            retry_count: AtomicU32::new(self.retry_count.load(Ordering::Relaxed)),
+            on_cancel_callback: Some(callback_wrapper),
+            fallback_work: self.fallback_work,
+            active_tasks: self.active_tasks,
+        }
     }
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > TracingTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -926,9 +951,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > TimedTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -962,9 +987,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > ContextualizedTask<T, I> for TokioEmittingTask<T, C, E, I>
 {
@@ -989,9 +1014,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > RecoverableTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -1035,9 +1060,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > StatusEnabledTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -1055,9 +1080,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > MetricsEnabledTask<T> for TokioEmittingTask<T, C, E, I>
 {
@@ -1079,9 +1104,9 @@ impl<
 }
 
 impl<
-    T: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
     I: TaskId,
 > NamedTask for TokioEmittingTask<T, C, E, I>
 {
