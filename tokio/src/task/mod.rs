@@ -23,6 +23,7 @@ pub mod task_id;
 pub mod task_metrics;
 pub mod relationships;
 pub mod task_relationships;
+pub mod task_relationships_impl;
 pub mod timed_task;
 pub mod tracing_task;
 
@@ -31,6 +32,8 @@ pub mod cpu_usage;
 pub mod io_usage;
 pub mod memory_usage;
 pub mod named_task;
+pub mod prioritized_task;
+pub mod status_enabled_task;
 
 // Main task implementation
 pub mod tokio_task;
@@ -48,6 +51,8 @@ pub use io_usage::*;
 pub use memory_usage::*;
 pub use message_builder::*;
 pub use named_task::*;
+pub use prioritized_task::*;
+pub use status_enabled_task::*;
 pub use recoverable_task::*;
 pub use spawn::*;
 pub use task_communication::*;
@@ -56,6 +61,7 @@ pub use task_id::*;
 pub use task_metrics::*;
 pub use relationships::TokioTaskRelationships;
 pub use task_relationships::TaskRelationshipManager;
+pub use task_relationships_impl::TokioTaskRelationships;
 
 pub use timed_task::*;
 pub use tracing_task::*;

@@ -6,6 +6,7 @@
 use std::fmt;
 use uuid::Uuid;
 use sweet_async_api::task::TaskId;
+use sweet_async_api::task::message_builder::{MessageBuilderExt, TaskMessageBuilder};
 
 /// UUID-based task identifier
 ///
@@ -116,6 +117,22 @@ impl From<u64> for SequentialTaskId {
 impl From<SequentialTaskId> for u64 {
     fn from(task_id: SequentialTaskId) -> Self {
         task_id.0
+    }
+}
+
+impl<T: Clone + Send + 'static> MessageBuilderExt<T> for TokioTaskId {
+    type Builder = crate::task::message_builder::TokioMessageBuilder<T, Self>;
+
+    fn message(&self) -> Self::Builder {
+        crate::task::message_builder::TokioMessageBuilder::new(*self)
+    }
+}
+
+impl<T: Clone + Send + 'static> MessageBuilderExt<T> for SequentialTaskId {
+    type Builder = crate::task::message_builder::TokioMessageBuilder<T, Self>;
+
+    fn message(&self) -> Self::Builder {
+        crate::task::message_builder::TokioMessageBuilder::new(*self)
     }
 }
 

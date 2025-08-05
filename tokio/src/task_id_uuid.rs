@@ -43,3 +43,11 @@ impl TaskId for UuidTaskId {
         uuid::Uuid::parse_str(s).ok().map(Self)
     }
 }
+
+impl<T: Clone + Send + 'static> MessageBuilderExt<T> for UuidTaskId {
+    type Builder = crate::task::message_builder::TokioMessageBuilder<T, Self>;
+
+    fn message(&self) -> Self::Builder {
+        crate::task::message_builder::TokioMessageBuilder::new(*self)
+    }
+}
