@@ -1,3 +1,5 @@
+#![feature(impl_trait_in_fn_trait_return)]
+
 mod macros;
 pub mod orchestra;
 pub mod task;

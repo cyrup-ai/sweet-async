@@ -22,12 +22,14 @@ use uuid::Uuid;
 use sweet_async_api::orchestra::OrchestratorError;
 use sweet_async_api::task::builder::ReceiverStrategy;
 use sweet_async_api::task::emit::{EmittingTask, ReceiverTask, SenderTask};
+use sweet_async_api::task::emit::event::Collector;
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
 use sweet_async_api::task::{AsyncTask, AsyncTaskError, TaskId, TaskPriority};
 
 use crate::task::async_task::TokioAsyncTask;
 use crate::task::emit::TokioFinalEvent;
 use crate::task::emit::event::TokioEvent;
+use crate::task::emit::collector::TokioCollector;
 use crate::task::relationships::TokioTaskRelationships;
 
 /// Tokio implementation of SenderTask trait
@@ -310,27 +312,14 @@ impl<
 
     /// Execute all registered cancellation callbacks
     async fn execute_cancellation_callbacks(&self) {
-        let callbacks = match self.cancellation_callbacks.try_lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(_) => {
-                tracing::warn!(
-                    "Could not acquire lock for cancellation callbacks, skipping execution"
-                );
-                return;
-            }
-        };
-
-        if !callbacks.is_empty() {
-            tracing::debug!("Executing {} cancellation callbacks", callbacks.len());
-            for callback in callbacks {
-                if let Err(e) = tokio::time::timeout(
-                    Duration::from_secs(5), // 5 second timeout per callback
-                    callback(),
-                )
-                .await
-                {
-                    tracing::warn!("Cancellation callback timed out: {:?}", e);
-                }
+        // Execute the immutable callback property if present
+        if let Some(ref callback) = self.on_cancel_callback {
+            let future = callback();
+            if let Err(e) = tokio::time::timeout(
+                Duration::from_secs(5),
+                future
+            ).await {
+                tracing::warn!("Cancellation callback timed out: {:?}", e);
             }
         }
     }
@@ -397,7 +386,7 @@ impl<
 impl<
     T: Clone + Send + 'static,
     C: Send + 'static,
-    E: Send + 'static + From<sweet_async_api::AsyncTaskError>,
+    E: Send + 'static,
     I: TaskId,
 > SenderTask<T, C, E, I> for TokioSenderTask<T, C, E, I>
 {
@@ -405,8 +394,7 @@ impl<
 
     fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
     where
-        F: Fn() -> R + Send + 'static,
-        R: IntoAsyncResult<C, E> + Send + 'static,
+        F: Fn(&T, &mut Collector<T, C>) -> (impl IntoAsyncResult<C, E> + Send + 'static),
     {
         let (tx, rx) = mpsc::unbounded_channel();
         let (result_tx, result_rx) = oneshot::channel();
@@ -440,7 +428,8 @@ impl<
                         match timeout_duration {
                             Some(timeout) => {
                                 match tokio::time::timeout(timeout, async move {
-                                    let result = (*receiver_clone)(event);
+                                    let mut collector = TokioCollector::new();
+                                    let result = (*receiver_clone)(&event, &mut collector);
                                     result.into_async_result().await
                                 }).await {
                                     Ok(Ok(result)) => {
@@ -466,7 +455,8 @@ impl<
                             None => {
                                 // Process without timeout
                                 let receiver_clone = Arc::clone(&receiver_fn);
-                                match (*receiver_clone)(event).into_async_result().await {
+                                let mut collector = TokioCollector::new();
+                                match (*receiver_clone)(&event, &mut collector).into_async_result().await {
                                     Ok(result) => {
                                         results.insert(event_id, Ok(result));
                                     }
@@ -502,7 +492,8 @@ impl<
                             let event_id = Uuid::new_v4();
 
                             // Process event with the actual receiver function
-                            match (*receiver_clone)(event).into_async_result().await {
+                            let mut collector = TokioCollector::new();
+                            match (*receiver_clone)(&event, &mut collector).into_async_result().await {
                                 Ok(result) => {
                                     results_clone.insert(event_id, Ok(result));
                                 }
@@ -552,8 +543,7 @@ impl<
 
     fn emit_events<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
     where
-        F: Fn(/* ... */) -> R + Send + 'static,
-        R: IntoAsyncResult<C, E> + Send + 'static,
+        F: Fn(&T, &mut Collector<T, C>) -> (impl IntoAsyncResult<C, E> + Send + 'static),
     {
         let runtime = self.runtime.clone();
         let task_id = self.id;
@@ -618,7 +608,7 @@ impl<
 
     fn await_final_event<Handler, R>(self, handler: Handler) -> R
     where
-        Handler: Fn(Self::Final, &dyn Any) -> R + Send + 'static,
+        Handler: Fn(Self::Final, &Collector<T, C>) -> R + Send + 'static,
         R: Send + 'static,
     {
         // Use current tokio runtime to block on async work
@@ -669,10 +659,11 @@ impl<
         let token = self.cancel_token.clone();
         let is_complete = self.is_complete.clone();
         
-        // Extract cancellation callbacks without capturing self
-        let callbacks = match self.cancellation_callbacks.try_lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(_) => Vec::new(),
+        // Execute callback using immutable pattern by creating a future immediately
+        let callback_future = if let Some(callback) = &self.on_cancel_callback {
+            Some(callback())
+        } else {
+            None
         };
 
         async move {
@@ -681,18 +672,18 @@ impl<
                     // Request graceful cancellation
                     token.cancel();
                     is_complete.store(true, Ordering::Relaxed);
-                    // Execute callbacks for graceful cancellation
-                    for callback in &callbacks {
-                        let _ = callback().await;
+                    // Execute callback for graceful cancellation
+                    if let Some(callback_fut) = callback_future {
+                        let _ = callback_fut.await;
                     }
                 }
                 CancellationLevel::Kill => {
                     // Force immediate cancellation
                     token.cancel();
                     is_complete.store(true, Ordering::SeqCst);
-                    // Execute callbacks quickly  
-                    for callback in &callbacks {
-                        let _ = callback().await;
+                    // Execute callback quickly  
+                    if let Some(callback_fut) = callback_future {
+                        let _ = callback_fut.await;
                     }
                 }
                 CancellationLevel::KillHard => {
@@ -709,20 +700,19 @@ impl<
         let token = self.cancel_token.clone();
         let is_complete = self.is_complete.clone();
         
-        // Extract callbacks without capturing self
-        let callbacks = match self.cancellation_callbacks.try_lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(_) => Vec::new(),
+        // Execute callback using immutable pattern
+        let callback_future = if let Some(callback) = &self.on_cancel_callback {
+            Some(callback())
+        } else {
+            None
         };
 
         async move {
             token.cancel();
             is_complete.store(true, Ordering::Relaxed);
-            // Execute callbacks for graceful cancellation
-            if !callbacks.is_empty() {
-                for callback in &callbacks {
-                    let _ = callback().await;
-                }
+            // Execute callback for graceful cancellation
+            if let Some(callback_fut) = callback_future {
+                let _ = callback_fut.await;
             }
             Ok(())
         }
@@ -732,20 +722,19 @@ impl<
         let token = self.cancel_token.clone();
         let is_complete = self.is_complete.clone();
         
-        // Extract callbacks without capturing self
-        let callbacks = match self.cancellation_callbacks.try_lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(_) => Vec::new(),
+        // Execute callback using immutable pattern
+        let callback_future = if let Some(callback) = &self.on_cancel_callback {
+            Some(callback())
+        } else {
+            None
         };
 
         async move {
             token.cancel();
             is_complete.store(true, Ordering::SeqCst);
-            // Execute callbacks for forceful cancellation
-            if !callbacks.is_empty() {
-                for callback in &callbacks {
-                    let _ = callback().await;
-                }
+            // Execute callback for forceful cancellation
+            if let Some(callback_fut) = callback_future {
+                let _ = callback_fut.await;
             }
             Ok(())
         }
@@ -775,7 +764,7 @@ impl<
             Box::pin(async move {
                 let fut = callback.run().await;
                 fut.await
-            })
+            }) as Pin<Box<dyn Future<Output = ()> + Send>>
         });
 
         Self {
@@ -1116,5 +1105,35 @@ impl<
 
     fn set_name(&mut self, _name: String) {
         // Would store the name
+    }
+}
+
+impl<
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    E: Send + 'static,
+    I: TaskId,
+> EmittingTask<T, C, E, I> for TokioEmittingTask<T, C, E, I>
+{
+    type Final = TokioFinalEvent<T, C, E, I>;
+
+    fn is_complete(&self) -> bool {
+        self.is_complete.load(Ordering::Relaxed)
+    }
+
+    fn cancel(&self) -> Result<(), OrchestratorError> {
+        self.cancel_token.cancel();
+        self.is_complete.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn await_final_event<Handler, R>(self, handler: Handler) -> R
+    where
+        Handler: Fn(Self::Final, &Collector<T, C>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        // This is a stub implementation that matches the API signature exactly
+        // The actual implementation would need proper final event construction
+        todo!("EmittingTask::await_final_event implementation needed")
     }
 }

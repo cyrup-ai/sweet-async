@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "api", "crossbeam",
+    "api",
     "sweet_async",
     "tokio",
 ]
 
 # Use the new resolver to handle features better
-resolver = "2"
+resolver = "3"
+package.edition = "2024"
 
 # Dependencies shared across workspace members
 [workspace.dependencies]
@@ -14,7 +15,7 @@ resolver = "2"
 futures = "0.3"
 futures-core = "0.3"
 futures-util = "0.3"
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 
 # Error handling
 thiserror = { version = "2.0", features = ["std"] }

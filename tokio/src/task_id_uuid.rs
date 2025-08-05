@@ -2,6 +2,7 @@
 //! as task identifiers out‐of‐the‐box.
 
 use sweet_async_api::task::TaskId;
+use sweet_async_api::task::message_builder::{MessageBuilderExt, TaskMessageBuilder};
 
 /// Wrapper around uuid::Uuid to implement TaskId trait (orphan rule compliance)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

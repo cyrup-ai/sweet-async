@@ -52,7 +52,12 @@
       "Bash(cargo run:*)",
       "Bash(git clone:*)",
       "mcp__desktop-commander__force_terminate",
-      "mcp__desktop-commander__get_config"
+      "mcp__desktop-commander__get_config",
+      "WebFetch(domain:internals.rust-lang.org)",
+      "Bash(for trait in \"ComparatorSequence\" \"IdSequence\" \"SizeExt\" \"TimeExt\" \"TimestampSequence\")",
+      "Bash(do echo \"=== $trait ===\")",
+      "Bash(done)",
+      "Bash(for trait in \"StreamingEvent\" \"Collector\" \"SenderEvent\" \"ReceiverEvent\" \"FinalEvent\")"
     ],
     "deny": []
   },

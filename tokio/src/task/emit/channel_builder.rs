@@ -881,7 +881,7 @@ where
     }
 }
 
-impl<T: Clone + Send + Sync + Unpin + 'static, C: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static, I: TaskId + Unpin + Default> EmittingTaskBuilder<T, C, E, I> for TokioEmittingTaskBuilder<T, C, E, I>
+impl<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'static, I: TaskId> EmittingTaskBuilder<T, C, E, I> for TokioEmittingTaskBuilder<T, C, E, I>
 {
     type SenderBuilder = ChannelSenderBuilder<T, C, E, I>;
 

@@ -1,8 +1,10 @@
 pub mod builder;
+pub mod execution_stats;
 pub mod orchestrator;
 pub mod runtime;
 
 pub use builder::{TokioOrchestratorBuilder, TokioTaskBuilderWithOrchestrator};
+pub use execution_stats::TokioExecutionStats;
 pub use orchestrator::TokioOrchestrator;
 pub use runtime::TokioRuntime;
 

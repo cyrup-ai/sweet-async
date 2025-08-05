@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use sweet_async_api::task::TaskId;
 pub use sweet_async_api::task::builder::{
-    AsyncTaskBuilder as ApiAsyncTaskBuilder, AsyncWork, ErrorStrategy, MinMax, ReceiverStrategy,
+    AsyncWork, ErrorStrategy, MinMax, ReceiverStrategy,
     SenderStrategy,
 };
 use tokio::runtime::Handle;
@@ -98,7 +98,7 @@ where
 
 }
 
-impl<T, I> ApiAsyncTaskBuilder for TokioAsyncTaskBuilder<T, I>
+impl<T, I> sweet_async_api::task::builder::AsyncTaskBuilder for TokioAsyncTaskBuilder<T, I>
 where
     T: Send + 'static,
     I: TaskId,

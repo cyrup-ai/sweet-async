@@ -20,7 +20,6 @@ pub struct TokioAndThenFuture<U> {
 impl<U> TokioAndThenFuture<U> {
     pub fn new<F>(inner: F) -> Self 
     where 
-        U: Send + 'static,
         F: Future<Output = TokioGenericTaskResult<U>> + Send + 'static,
     {
         Self { inner: Box::pin(inner) }

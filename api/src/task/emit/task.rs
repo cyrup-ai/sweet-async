@@ -1,5 +1,6 @@
 use crate::task::builder::ReceiverStrategy;
 use crate::task::emit::FinalEvent;
+use crate::task::emit::event::Collector;
 
 use crate::orchestra::OrchestratorError;
 use crate::task::AsyncTask;
@@ -14,7 +15,7 @@ pub trait SenderTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + 'st
     type EmittingTaskType: EmittingTask<T, C, E, I>;
     fn receiver<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
     where
-        F: Fn(/* ... */) -> R + Send + 'static,
+        F: Fn(&T, &mut Collector<T, C>) -> R + Send + 'static,
         R: IntoAsyncResult<C, E> + Send + 'static;
 }
 
@@ -25,7 +26,7 @@ pub trait ReceiverTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + '
     type EmittingTaskType: EmittingTask<T, C, E, I>;
     fn emit_events<F, R>(&self, receiver: F, strategy: ReceiverStrategy) -> Self::EmittingTaskType
     where
-        F: Fn(/* ... */) -> R + Send + 'static,
+        F: Fn(&T, &mut Collector<T, C>) -> R + Send + 'static,
         R: IntoAsyncResult<C, E> + Send + 'static;
 }
 
@@ -42,6 +43,6 @@ pub trait EmittingTask<T: Clone + Send + 'static, C: Send + 'static, E: Send + '
     /// Await the final event and apply handler function
     fn await_final_event<Handler, R>(self, handler: Handler) -> R
     where
-        Handler: Fn(Self::Final, &dyn std::any::Any) -> R + Send + 'static,
+        Handler: Fn(Self::Final, &Collector<T, C>) -> R + Send + 'static,
         R: Send + 'static;
 }

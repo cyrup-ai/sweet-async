@@ -525,11 +525,13 @@ impl<T: Clone + Send + 'static, I: TaskId> CancellableTask<T> for TokioAsyncTask
         Fut: Future<Output = ()> + Send + 'static,
     {
         // Immutable builder pattern: return new instance with callback property
+        let callback_arc = std::sync::Arc::new(callback);
         let callback_wrapper = Box::new(move || {
+            let callback_clone = callback_arc.clone();
             Box::pin(async move {
-                let fut = callback.run().await;
+                let fut = callback_clone.run().await;
                 fut.await
-            })
+            }) as Pin<Box<dyn Future<Output = ()> + Send>>
         });
         
         Self {

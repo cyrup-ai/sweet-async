@@ -1,3 +1,5 @@
+#![feature(impl_trait_in_fn_trait_return)]
+
 //! # Sweet Async - Tokio Implementation
 //!
 //! A fluent, immutable builder for orchestrating asynchronous work with powerful abstractions
