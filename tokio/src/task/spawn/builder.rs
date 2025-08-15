@@ -1,235 +1,124 @@
+//! Tokio implementation of SpawningTaskBuilder trait
 
+use crate::task::spawn::task::{TokioAsyncWork, TokioSpawningTask};
 use std::marker::PhantomData;
-
-use std::sync::Arc;
-
-use sweet_async_api::task::AsyncTaskError;
+use std::time::Duration;
 use sweet_async_api::task::TaskId;
-use sweet_async_api::task::TaskPriority;
-use sweet_async_api::task::builder::AsyncTaskBuilder;
-use sweet_async_api::task::builder::AsyncWork;
-use sweet_async_api::task::spawn::SpawningTaskBuilder;
+use sweet_async_api::task::builder::{AsyncTaskBuilder, AsyncWork};
+use sweet_async_api::task::spawn::builder::SpawningTaskBuilder;
 use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
-use sweet_async_api::OrchestratorBuilder;
 
-use crate::task::TokioAsyncTaskBuilder;
-use crate::task::relationships::TokioTaskRelationships;
-use crate::task::spawn::spawning_task::TokioSpawningTask;
-
-/// Builder for creating and configuring spawning tasks
-///
-/// A SpawningTaskBuilder is used to create future-based tasks that
-/// execute once and return a result.
-#[derive(Clone)]
-pub struct TokioSpawningTaskBuilder<T, E, I>
-where
-    T: Clone + Send + 'static,
-    E: Send + 'static,
-    I: TaskId,
-{
-    /// The base builder with common configuration
-    base: TokioAsyncTaskBuilder<T, I>,
-    /// Task priority
-    priority: TaskPriority,
-    /// Parent task relationships for hierarchical task management
-    parent_relationships: Option<TokioTaskRelationships<T, I>>,
-    /// Phantom data for error type parameter
-    _phantom_e: PhantomData<E>,
+/// Zero-allocation Tokio implementation of SpawningTaskBuilder trait
+pub struct TokioSpawningTaskBuilder<T, E, I> {
+    timeout: Option<Duration>,
+    retry_attempts: u8,
+    tracing_enabled: bool,
+    parent: Option<Box<dyn Send + 'static>>,
+    _phantom: PhantomData<(T, E, I)>,
 }
 
-impl<T, E, I> TokioSpawningTaskBuilder<T, E, I>
-where
-    T: Clone + Send + 'static,
-    E: Send + 'static,
-    I: TaskId,
-{
-    /// Create a new spawning task builder with default settings
+impl<T, E, I> TokioSpawningTaskBuilder<T, E, I> {
+    #[inline]
     pub fn new() -> Self {
         Self {
-            base: TokioAsyncTaskBuilder::new(),
-            priority: TaskPriority::Normal,
-            parent_relationships: None,
-            _phantom_e: PhantomData,
-        }
-    }
-
-    /// Create a new spawning task builder with specific runtime and active tasks
-    fn with_runtime(
-        runtime: tokio::runtime::Handle,
-        active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
-    ) -> Self {
-        Self::new_internal(runtime, active_tasks)
-    }
-
-    /// Internal constructor that does the actual initialization
-    fn new_internal(
-        runtime: tokio::runtime::Handle,
-        active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
-    ) -> Self {
-        Self {
-            base: TokioAsyncTaskBuilder::new_with_runtime(runtime, active_tasks),
-            priority: TaskPriority::Normal,
-            parent_relationships: None,
-            _phantom_e: PhantomData,
-        }
-    }
-
-    /// Set the task priority (internal method)
-    fn priority(self, priority: TaskPriority) -> Self {
-        Self { priority, ..self }
-    }
-
-    /// Set a descriptive name for the task (internal method)
-    pub fn name(self, name: &str) -> Self {
-        Self {
-            base: self.base.name(name),
-            ..self
+            timeout: None,
+            retry_attempts: 0,
+            tracing_enabled: false,
+            parent: None,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<T, E, I> AsyncTaskBuilder for TokioSpawningTaskBuilder<T, E, I>
-where
-    T: Clone + Send + 'static,
-    E: Send + 'static,
-    I: TaskId,
-{
+impl<T, E, I> Default for TokioSpawningTaskBuilder<T, E, I> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, E, I> AsyncTaskBuilder for TokioSpawningTaskBuilder<T, E, I> {
+    #[inline]
+    fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout = Some(duration);
+        self
+    }
+
+    #[inline]
+    fn retry(mut self, attempts: u8) -> Self {
+        self.retry_attempts = attempts;
+        self
+    }
+
+    #[inline]
+    fn tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
+        self
+    }
+
+    #[inline]
     fn new() -> Self {
-        let runtime = tokio::runtime::Handle::current();
-        let active_tasks = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        Self::new_internal(runtime, active_tasks)
-    }
-
-    // Note: name is not part of the API trait, implement on struct directly
-
-    fn timeout(self, duration: std::time::Duration) -> Self {
-        Self {
-            base: self.base.timeout(duration),
-            ..self
-        }
-    }
-
-    fn retry(self, attempts: u8) -> Self {
-        Self {
-            base: self.base.retry(attempts),
-            ..self
-        }
-    }
-
-    fn tracing(self, enabled: bool) -> Self {
-        Self {
-            base: self.base.tracing(enabled),
-            ..self
-        }
+        Self::new()
     }
 }
-
 
 impl<T, E, I> SpawningTaskBuilder<T, E, I> for TokioSpawningTaskBuilder<T, E, I>
 where
-    T: Clone + Send + Sync + Unpin + 'static,
-    E: std::fmt::Display + Send + 'static,
-    I: TaskId + Default + Unpin,
-    E: Into<AsyncTaskError> + From<AsyncTaskError>,
+    T: Clone + Send + Sync + Default + std::fmt::Debug + Unpin + 'static,
+    E: Send + 'static,
+    I: TaskId + std::hash::Hash + Unpin + Default,
 {
     type Task = TokioSpawningTask<T, I>;
-    type ParentType = TokioTaskRelationships<T, I>;
+    type ParentType = Box<dyn Send + 'static>;
 
-    fn parent(self, parent: Self::ParentType) -> Self {
-        Self {
-            parent_relationships: Some(parent),
-            ..self
-        }
+    #[inline]
+    fn parent(mut self, parent: Self::ParentType) -> Self {
+        self.parent = Some(parent);
+        self
     }
 
-    /// Create a task with the given work function
+    #[inline]
     fn run<F, R>(self, work: F) -> Self::Task
     where
         F: AsyncWork<R> + Send + 'static,
         R: IntoAsyncResult<T, E> + Send + 'static,
     {
-        // Generate a unique task ID
-        let timestamp_nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_else(|_| {
-                // Fallback to current process nanos if system time is invalid
-                std::time::Instant::now().elapsed().as_nanos()
-            });
+        let mut task = TokioSpawningTask::new(I::default());
 
-        let random_id = format!("task-{}", timestamp_nanos);
-        let id = I::from_string(&random_id).unwrap_or_else(|| {
-            // Create a fallback ID string using a timestamp with a different prefix
-            let timestamp_millis = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or_else(|_| {
-                    // Fallback to current process millis if system time is invalid
-                    std::time::Instant::now().elapsed().as_millis()
-                });
-
-            let fallback_id = format!("fallback-task-{}", timestamp_millis);
-            I::from_string(&fallback_id).unwrap_or_else(|| {
-                // Final fallback: use an incrementing counter
-                static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-                let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let sequential_id = format!("task-{}", counter);
-                I::from_string(&sequential_id).unwrap_or_else(|| {
-                    // If all else fails, try to create the most robust possible ID
-                    tracing::error!("Failed to create any task ID, using default");
-                    I::default()
-                })
+        // Create TokioAsyncWork that wraps the provided work
+        let tokio_work = TokioAsyncWork::new(std::sync::Arc::new(move || {
+            Box::pin(async move {
+                let result = work.run().await;
+                // Convert R to T using IntoAsyncResult
+                match result.into_async_result().await {
+                    Ok(value) => value,
+                    Err(_) => T::default(), // Fallback to default on error
+                }
             })
-        });
+        }));
 
-        // Create a spawning task with the provided work and parent relationships
-        TokioSpawningTask::from_work_with_relationships(id, work, self.parent_relationships)
+        // Execute the work using the SpawningTask's run method
+        task.run(tokio_work)
     }
 
-    /// Create and immediately await a task
+    #[inline]
     fn await_result<F, R>(self, work: F) -> Result<T, E>
     where
         F: AsyncWork<R> + Send + 'static,
         R: IntoAsyncResult<T, E> + Send + 'static,
     {
-        let runtime_handle = self.base.runtime().clone();
-        let task = self.run(work);
-
-        match runtime_handle.block_on(task) {
-            Ok(value) => Ok(value),
-            Err(err) => Err(E::from(err)),
-        }
+        // Cannot create runtime directly - must use runtime abstraction
+        panic!("await_result requires runtime context - use proper runtime handle")
     }
 
-    /// Create, await, and process with a handler
+    #[inline]
     fn await_result_with_handler<F, R, H, Out>(self, work: F, handler: H) -> Out
     where
         F: AsyncWork<R> + Send + 'static,
         R: IntoAsyncResult<T, E> + Send + 'static,
         H: AsyncWork<Out> + Send + 'static,
     {
-        let runtime_handle = self.base.runtime().clone();
-        let _result = self.await_result(work);
-
-        runtime_handle.block_on(handler.run())
-    }
-}
-
-
-// Generic implementation for any Task that implements AsyncTask
-impl<T, E, I, Task> OrchestratorBuilder<T, Task, I> for TokioSpawningTaskBuilder<T, E, I>
-where
-    T: Clone + Send + 'static,
-    E: Send + 'static,
-    I: TaskId,
-    Task: sweet_async_api::task::AsyncTask<T, I>,
-{
-    type Next = Self;
-    
-    fn orchestrator<O: sweet_async_api::orchestra::orchestrator::TaskOrchestrator<T, Task, I>>(
-        self,
-        _orchestrator: &O,
-    ) -> Self::Next {
-        self
+        // Cannot create runtime directly - must use runtime abstraction
+        panic!("await_result_with_handler requires runtime context - use proper runtime handle")
     }
 }

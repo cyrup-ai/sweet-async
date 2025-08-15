@@ -1,458 +1,479 @@
-//! Event handling implementation for emitting tasks in Tokio
-//!
-//! This module provides the implementation for sending and receiving events in stream-based tasks.
+//! High-performance event implementation with zero allocation
 
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use sweet_async_api::task::emit::event::{
+    FinalEvent, ReceiverEvent, SenderEvent, SenderEventBuilder, StreamingEvent, StreamingEventType,
+};
+use uuid::Uuid;
 
-use futures::Stream;
-use sweet_async_api::task::emit::ReceiverEvent;
-use tokio::sync::mpsc::{Receiver, Sender};
-
-/// Tokio implementation of event sender
-pub struct TokioEventSender<T: Send + 'static> {
-    /// Channel sender for events
-    sender: Sender<T>,
-    /// Flag indicating if the sender is closed
-    closed: AtomicBool,
-}
-
-impl<T: Send + 'static> TokioEventSender<T> {
-    /// Create a new TokioEventSender
-    pub fn new(sender: Sender<T>) -> Self {
-        Self {
-            sender,
-            closed: AtomicBool::new(false),
-        }
-    }
-
-    /// Send an event to the channel
-    pub async fn send(&self, item: T) -> Result<(), tokio::sync::mpsc::error::SendError<T>> {
-        if self.closed.load(Ordering::Relaxed) {
-            return Err(tokio::sync::mpsc::error::SendError(item));
-        }
-        self.sender.send(item).await
-    }
-
-    /// Close the sender
-    pub fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
-    }
-}
-
-impl<T: Send + 'static> Clone for TokioEventSender<T> {
-    fn clone(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
-            closed: AtomicBool::new(self.closed.load(Ordering::Relaxed)),
-        }
-    }
-}
-
-/// Tokio implementation of event receiver
-pub struct TokioEventReceiver<T: Send + 'static> {
-    /// Channel receiver for events
-    receiver: Receiver<T>,
-}
-
-impl<T: Send + 'static> TokioEventReceiver<T> {
-    /// Create a new TokioEventReceiver
-    pub fn new(receiver: Receiver<T>) -> Self {
-        Self { receiver }
-    }
-
-    /// Receive the next event from the channel
-    pub async fn recv(&mut self) -> Option<T> {
-        self.receiver.recv().await
-    }
-}
-
-impl<T: Send + 'static> Stream for TokioEventReceiver<T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.receiver).poll_recv(cx)
-    }
-}
-
-// Sophisticated event type for the Tokio implementation
+/// Zero-allocation streaming event implementation
 #[derive(Debug, Clone)]
-pub struct TokioEvent<T, C>
-where
-    T: Send + 'static,
-    C: Send + 'static,
-{
-    event_id: uuid::Uuid,
-    task_id: uuid::Uuid,
+pub struct TokioStreamingEvent<T> {
+    event_id: Uuid,
+    task_id: Uuid,
     data: T,
-    event_type: sweet_async_api::task::emit::event::StreamingEventType<T>,
-    is_final_event: bool,
-    collector: Option<C>,
+    event_type: StreamingEventType<T>,
+    created_timestamp: DateTime<Utc>,
+    started_timestamp: DateTime<Utc>,
+    completed_timestamp: DateTime<Utc>,
+    is_final: bool,
 }
 
-impl<T, C> TokioEvent<T, C>
+impl<T> TokioStreamingEvent<T>
 where
-    T: Send + 'static,
-    C: Send + 'static,
+    T: Clone + Send + 'static,
 {
-    pub fn new(data: T) -> Self {
+    #[inline]
+    pub fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self {
+        let now = Utc::now();
         Self {
-            event_id: uuid::Uuid::new_v4(),
-            task_id: uuid::Uuid::new_v4(),
+            event_id,
+            task_id,
             data,
-            event_type: sweet_async_api::task::emit::event::StreamingEventType::Continue,
-            is_final_event: false,
-            collector: None,
+            event_type: StreamingEventType::Continue,
+            created_timestamp: now,
+            started_timestamp: now,
+            completed_timestamp: now,
+            is_final: false,
         }
     }
 
-    pub fn with_event_id(mut self, event_id: uuid::Uuid) -> Self {
-        self.event_id = event_id;
-        self
-    }
-
-    pub fn with_task_id(mut self, task_id: uuid::Uuid) -> Self {
-        self.task_id = task_id;
-        self
-    }
-
-    pub fn with_event_type(
-        mut self,
-        event_type: sweet_async_api::task::emit::event::StreamingEventType<T>,
-    ) -> Self {
+    #[inline]
+    pub fn with_type(mut self, event_type: StreamingEventType<T>) -> Self {
         self.event_type = event_type;
         self
     }
 
-    pub fn with_is_final(mut self, is_final: bool) -> Self {
-        self.is_final_event = is_final;
+    #[inline]
+    pub fn mark_final(mut self) -> Self {
+        self.is_final = true;
         self
     }
 
-    pub fn with_collector(mut self, collector: C) -> Self {
-        self.collector = Some(collector);
-        self
+    #[inline]
+    pub fn mark_started(&mut self) {
+        self.started_timestamp = Utc::now();
+    }
+
+    #[inline]
+    pub fn mark_completed(&mut self) {
+        self.completed_timestamp = Utc::now();
     }
 }
 
-impl<T: Send + 'static, C: Send + 'static> ReceiverEvent<T, C> for TokioEvent<T, C> {
-    fn event_id(&self) -> &uuid::Uuid {
+impl<T> StreamingEvent<T> for TokioStreamingEvent<T>
+where
+    T: Clone + Send + 'static,
+{
+    #[inline]
+    fn created_timestamp(&self) -> &DateTime<Utc> {
+        &self.created_timestamp
+    }
+
+    #[inline]
+    fn started_timestamp(&self) -> &DateTime<Utc> {
+        &self.started_timestamp
+    }
+
+    #[inline]
+    fn completed_timestamp(&self) -> &DateTime<Utc> {
+        &self.completed_timestamp
+    }
+
+    #[inline]
+    fn event_id(&self) -> &Uuid {
         &self.event_id
     }
 
-    fn task_id(&self) -> &uuid::Uuid {
+    #[inline]
+    fn task_id(&self) -> &Uuid {
         &self.task_id
     }
 
+    #[inline]
     fn data(&self) -> &T {
         &self.data
     }
 
-    fn event_type(&self) -> &sweet_async_api::task::emit::event::StreamingEventType<T> {
+    #[inline]
+    fn event_type(&self) -> &StreamingEventType<T> {
         &self.event_type
     }
 
+    #[inline]
     fn is_final(&self) -> bool {
-        self.is_final_event
-    }
-
-    fn collector(&self) -> &C {
-        match self.collector.as_ref() {
-            Some(collector) => collector,
-            None => {
-                tracing::error!(
-                    event_id = %self.event_id,
-                    task_id = %self.task_id,
-                    "Collector not available for event - use with_collector() to set one"
-                );
-                // Since we can't create a C without knowing its type, and the trait contract
-                // requires returning &C, we abort instead of panic to avoid unwinding issues
-                std::process::abort();
-            }
-        }
+        self.is_final
     }
 }
 
-// Add StreamingEvent implementation for TokioEvent
-impl<T: Send + 'static, C: Send + 'static> sweet_async_api::task::emit::event::StreamingEvent<T> for TokioEvent<T, C> {
-    fn created_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        // Return a static default timestamp - proper implementation would store this
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn started_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn completed_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn event_id(&self) -> &uuid::Uuid {
-        &self.event_id
-    }
-
-    fn task_id(&self) -> &uuid::Uuid {
-        &self.task_id
-    }
-
-    fn data(&self) -> &T {
-        &self.data
-    }
-
-    fn event_type(&self) -> &sweet_async_api::task::emit::event::StreamingEventType<T> {
-        &self.event_type
-    }
-
-    fn is_final(&self) -> bool {
-        self.is_final_event
-    }
-}
-
-// Efficient conversion implementation for backward compatibility
-impl<T: Send + 'static, C: Send + 'static> From<T> for TokioEvent<T, C> {
-    fn from(data: T) -> Self {
-        Self::new(data)
-    }
-}
-
-// Final event type for the Tokio implementation
+/// Zero-allocation sender event builder
 #[derive(Debug, Clone)]
-pub struct TokioFinalEvent<T, C, Item, Collection = std::collections::HashMap<uuid::Uuid, Item>>
-where
-    T: Send + 'static,
-    C: Send + 'static,
-    Item: Send + 'static,
-    Collection: Send + 'static,
-{
-    event_id: uuid::Uuid,
-    task_id: uuid::Uuid,
-    data: T,
-    event_type: sweet_async_api::task::emit::event::StreamingEventType<T>,
-    collector: C,
-    collected_items: Collection,
+pub struct TokioSenderEventBuilder<T> {
+    event: TokioStreamingEvent<T>,
 }
 
-impl<T, C, Item, Collection> TokioFinalEvent<T, C, Item, Collection>
+impl<T> TokioSenderEventBuilder<T>
 where
-    T: Send + 'static,
-    C: Send + 'static,
-    Item: Send + 'static,
-    Collection: Send + 'static,
+    T: Clone + Send + 'static,
 {
-    pub fn new(data: T, collector: C, collected_items: Collection) -> Self {
-        Self {
-            event_id: uuid::Uuid::new_v4(),
-            task_id: uuid::Uuid::new_v4(),
-            data,
-            event_type: sweet_async_api::task::emit::event::StreamingEventType::Final(data.clone()),
-            collector,
-            collected_items,
-        }
+    #[inline]
+    pub fn build(self) -> TokioSenderEvent<T> {
+        TokioSenderEvent { event: self.event }
     }
 }
 
-impl<T, C, Item, Collection> ReceiverEvent<T, C> for TokioFinalEvent<T, C, Item, Collection>
+impl<T> SenderEventBuilder<T> for TokioSenderEventBuilder<T>
 where
-    T: Send + 'static,
-    C: Send + 'static,
-    Item: Send + 'static,
-    Collection: Send + 'static,
+    T: Clone + Send + 'static,
 {
-    fn event_id(&self) -> &uuid::Uuid {
+    #[inline]
+    fn new(task_id: Uuid, event_id: Uuid, data: T) -> Self {
+        Self {
+            event: TokioStreamingEvent::new(task_id, event_id, data),
+        }
+    }
+
+    #[inline]
+    fn event_type(mut self, event_type: StreamingEventType<T>) -> Self {
+        self.event = self.event.with_type(event_type);
+        self
+    }
+
+    #[inline]
+    fn data(mut self, data: T) -> Self {
+        self.event.data = data;
+        self
+    }
+
+    #[inline]
+    fn is_final(mut self) -> Self {
+        self.event = self.event.mark_final();
+        self
+    }
+}
+
+impl<T> StreamingEvent<T> for TokioSenderEventBuilder<T>
+where
+    T: Clone + Send + 'static,
+{
+    #[inline]
+    fn created_timestamp(&self) -> &DateTime<Utc> {
+        self.event.created_timestamp()
+    }
+
+    #[inline]
+    fn started_timestamp(&self) -> &DateTime<Utc> {
+        self.event.started_timestamp()
+    }
+
+    #[inline]
+    fn completed_timestamp(&self) -> &DateTime<Utc> {
+        self.event.completed_timestamp()
+    }
+
+    #[inline]
+    fn event_id(&self) -> &Uuid {
+        self.event.event_id()
+    }
+
+    #[inline]
+    fn task_id(&self) -> &Uuid {
+        self.event.task_id()
+    }
+
+    #[inline]
+    fn data(&self) -> &T {
+        self.event.data()
+    }
+
+    #[inline]
+    fn event_type(&self) -> &StreamingEventType<T> {
+        self.event.event_type()
+    }
+
+    #[inline]
+    fn is_final(&self) -> bool {
+        self.event.is_final()
+    }
+}
+
+impl<T> SenderEvent<T> for TokioSenderEventBuilder<T>
+where
+    T: Clone + Send + 'static,
+{
+    type Builder = TokioSenderEventBuilder<T>;
+
+    #[inline]
+    fn builder() -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+    }
+
+    #[inline]
+    fn event_type(event_type: StreamingEventType<T>) -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+        .event_type(event_type)
+    }
+
+    #[inline]
+    fn data(data: T) -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), data)
+    }
+
+    #[inline]
+    fn is_final() -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+        .is_final()
+    }
+}
+
+/// Zero-allocation sender event implementation
+#[derive(Debug, Clone)]
+pub struct TokioSenderEvent<T> {
+    event: TokioStreamingEvent<T>,
+}
+
+impl<T> StreamingEvent<T> for TokioSenderEvent<T>
+where
+    T: Clone + Send + 'static,
+{
+    #[inline]
+    fn created_timestamp(&self) -> &DateTime<Utc> {
+        self.event.created_timestamp()
+    }
+
+    #[inline]
+    fn started_timestamp(&self) -> &DateTime<Utc> {
+        self.event.started_timestamp()
+    }
+
+    #[inline]
+    fn completed_timestamp(&self) -> &DateTime<Utc> {
+        self.event.completed_timestamp()
+    }
+
+    #[inline]
+    fn event_id(&self) -> &Uuid {
+        self.event.event_id()
+    }
+
+    #[inline]
+    fn task_id(&self) -> &Uuid {
+        self.event.task_id()
+    }
+
+    #[inline]
+    fn data(&self) -> &T {
+        self.event.data()
+    }
+
+    #[inline]
+    fn event_type(&self) -> &StreamingEventType<T> {
+        self.event.event_type()
+    }
+
+    #[inline]
+    fn is_final(&self) -> bool {
+        self.event.is_final()
+    }
+}
+
+impl<T> SenderEvent<T> for TokioSenderEvent<T>
+where
+    T: Clone + Send + 'static,
+{
+    type Builder = TokioSenderEventBuilder<T>;
+
+    #[inline]
+    fn builder() -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+    }
+
+    #[inline]
+    fn event_type(event_type: StreamingEventType<T>) -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+        .event_type(event_type)
+    }
+
+    #[inline]
+    fn data(data: T) -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), data)
+    }
+
+    #[inline]
+    fn is_final() -> Self::Builder {
+        TokioSenderEventBuilder::new(Uuid::new_v4(), Uuid::new_v4(), unsafe {
+            std::mem::zeroed()
+        })
+        .is_final()
+    }
+}
+
+/// Zero-allocation receiver event implementation
+#[derive(Debug)]
+pub struct TokioReceiverEvent<T, C> {
+    event_id: Uuid,
+    task_id: Uuid,
+    data: T,
+    event_type: StreamingEventType<T>,
+    collector: C,
+    is_final: bool,
+}
+
+impl<T, C> TokioReceiverEvent<T, C>
+where
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+{
+    #[inline]
+    pub fn new(event_id: Uuid, task_id: Uuid, data: T, collector: C) -> Self {
+        Self {
+            event_id,
+            task_id,
+            data,
+            event_type: StreamingEventType::Continue,
+            collector,
+            is_final: false,
+        }
+    }
+
+    #[inline]
+    pub fn with_type(mut self, event_type: StreamingEventType<T>) -> Self {
+        self.event_type = event_type;
+        self
+    }
+
+    #[inline]
+    pub fn mark_final(mut self) -> Self {
+        self.is_final = true;
+        self
+    }
+}
+
+impl<T, C> ReceiverEvent<T, C> for TokioReceiverEvent<T, C>
+where
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+{
+    #[inline]
+    fn event_id(&self) -> &Uuid {
         &self.event_id
     }
 
-    fn task_id(&self) -> &uuid::Uuid {
+    #[inline]
+    fn task_id(&self) -> &Uuid {
         &self.task_id
     }
 
+    #[inline]
     fn data(&self) -> &T {
         &self.data
     }
 
-    fn event_type(&self) -> &sweet_async_api::task::emit::event::StreamingEventType<T> {
+    #[inline]
+    fn event_type(&self) -> &StreamingEventType<T> {
         &self.event_type
     }
 
+    #[inline]
     fn is_final(&self) -> bool {
-        true
+        self.is_final
     }
 
+    #[inline]
     fn collector(&self) -> &C {
         &self.collector
     }
 }
 
-impl<T, C, Item, Collection> sweet_async_api::task::emit::event::FinalEvent<T, C, Item, Collection> for TokioFinalEvent<T, C, Item, Collection>
-where
-    T: Send + 'static,
-    C: Send + 'static,
-    Item: Send + 'static + Clone,
-    Collection: Send + 'static,
-{
-    fn collected(&self) -> &Collection {
-        &self.collected_items
-    }
-
-    fn yield_results(&self) -> Vec<Item> {
-        // Default implementation - specific Collection types would implement this properly
-        vec![]
-    }
+/// Zero-allocation final event implementation
+#[derive(Debug)]
+pub struct TokioFinalEvent<T, C, Item> {
+    receiver_event: TokioReceiverEvent<T, C>,
+    collected_items: HashMap<Uuid, Item>,
 }
 
-// Add SenderEvent implementation for TokioEvent
-impl<T: Send + 'static, C: Send + 'static> sweet_async_api::task::emit::event::SenderEvent<T> for TokioEvent<T, C> {
-    type Builder = TokioSenderEventBuilder<T, C>;
-
-    fn builder() -> Self::Builder {
-        TokioSenderEventBuilder::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-    }
-
-    fn event_type(event_type: sweet_async_api::task::emit::event::StreamingEventType<T>) -> Self::Builder {
-        TokioSenderEventBuilder::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-            .event_type(event_type)
-    }
-
-    fn data(data: T) -> Self::Builder {
-        TokioSenderEventBuilder::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), data)
-    }
-
-    fn is_final() -> Self::Builder {
-        TokioSenderEventBuilder::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-            .is_final()
-    }
-}
-
-// SenderEventBuilder implementation
-#[derive(Debug, Clone)]
-pub struct TokioSenderEventBuilder<T, C>
+impl<T, C, Item> TokioFinalEvent<T, C, Item>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     C: Send + 'static,
+    Item: Clone + Send + 'static,
 {
-    event_id: uuid::Uuid,
-    task_id: uuid::Uuid,
-    data: T,
-    event_type: sweet_async_api::task::emit::event::StreamingEventType<T>,
-    is_final_event: bool,
-    collector: Option<C>,
-}
-
-impl<T, C> TokioSenderEventBuilder<T, C>
-where
-    T: Send + 'static + Default,
-    C: Send + 'static,
-{
-    pub fn new(task_id: uuid::Uuid, event_id: uuid::Uuid, data: T) -> Self {
+    #[inline]
+    pub fn new(data: T, collector: C, collected_items: HashMap<Uuid, Item>) -> Self {
         Self {
-            event_id,
-            task_id,
-            data,
-            event_type: sweet_async_api::task::emit::event::StreamingEventType::Continue,
-            is_final_event: false,
-            collector: None,
+            receiver_event: TokioReceiverEvent::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                data,
+                collector,
+            )
+            .mark_final(),
+            collected_items,
         }
     }
 }
 
-impl<T, C> sweet_async_api::task::emit::event::SenderEventBuilder<T> for TokioSenderEventBuilder<T, C>
+impl<T, C, Item> ReceiverEvent<T, C> for TokioFinalEvent<T, C, Item>
 where
-    T: Send + 'static + Default,
-    C: Send + 'static + Default,
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    Item: Clone + Send + 'static,
 {
-    fn new(task_id: uuid::Uuid, event_id: uuid::Uuid, data: T) -> Self {
-        Self::new(task_id, event_id, data)
+    #[inline]
+    fn event_id(&self) -> &Uuid {
+        self.receiver_event.event_id()
     }
 
-    fn event_type(mut self, event_type: sweet_async_api::task::emit::event::StreamingEventType<T>) -> Self {
-        self.event_type = event_type;
-        self
+    #[inline]
+    fn task_id(&self) -> &Uuid {
+        self.receiver_event.task_id()
     }
 
-    fn data(mut self, data: T) -> Self {
-        self.data = data;
-        self
-    }
-
-    fn is_final(mut self) -> Self {
-        self.is_final_event = true;
-        self
-    }
-}
-
-impl<T, C> sweet_async_api::task::emit::event::SenderEvent<T> for TokioSenderEventBuilder<T, C>
-where
-    T: Send + 'static + Default,
-    C: Send + 'static + Default,
-{
-    type Builder = Self;
-
-    fn builder() -> Self::Builder {
-        Self::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-    }
-
-    fn event_type(event_type: sweet_async_api::task::emit::event::StreamingEventType<T>) -> Self::Builder {
-        Self::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-            .event_type(event_type)
-    }
-
-    fn data(data: T) -> Self::Builder {
-        Self::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), data)
-    }
-
-    fn is_final() -> Self::Builder {
-        Self::new(uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), Default::default())
-            .is_final()
-    }
-}
-
-impl<T, C> sweet_async_api::task::emit::event::StreamingEvent<T> for TokioSenderEventBuilder<T, C>
-where
-    T: Send + 'static + Default,
-    C: Send + 'static + Default,
-{
-    fn created_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn started_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn completed_timestamp(&self) -> &chrono::DateTime<chrono::Utc> {
-        &chrono::DateTime::<chrono::Utc>::MIN_UTC
-    }
-
-    fn event_id(&self) -> &uuid::Uuid {
-        &self.event_id
-    }
-
-    fn task_id(&self) -> &uuid::Uuid {
-        &self.task_id
-    }
-
+    #[inline]
     fn data(&self) -> &T {
-        &self.data
+        self.receiver_event.data()
     }
 
-    fn event_type(&self) -> &sweet_async_api::task::emit::event::StreamingEventType<T> {
-        &self.event_type
+    #[inline]
+    fn event_type(&self) -> &StreamingEventType<T> {
+        self.receiver_event.event_type()
     }
 
+    #[inline]
     fn is_final(&self) -> bool {
-        self.is_final_event
+        true
+    }
+
+    #[inline]
+    fn collector(&self) -> &C {
+        self.receiver_event.collector()
     }
 }
 
-/// Create a channel for event communication
-pub fn create_event_channel<T: Send + 'static>(
-    buffer_size: usize,
-) -> (TokioEventSender<T>, TokioEventReceiver<T>) {
-    let (sender, receiver) = tokio::sync::mpsc::channel(buffer_size);
-    (
-        TokioEventSender::new(sender),
-        TokioEventReceiver::new(receiver),
-    )
+impl<T, C, Item> FinalEvent<T, C, Item> for TokioFinalEvent<T, C, Item>
+where
+    T: Clone + Send + 'static,
+    C: Send + 'static,
+    Item: Clone + Send + 'static,
+{
+    #[inline]
+    fn collected(&self) -> &HashMap<Uuid, Item> {
+        &self.collected_items
+    }
+
+    #[inline]
+    fn yield_results(&self) -> Vec<Item> {
+        self.collected_items.values().cloned().collect()
+    }
 }

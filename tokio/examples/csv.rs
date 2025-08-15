@@ -1,19 +1,21 @@
-use sweet_async_tokio::task::{AsyncTask, CsvRecord, Delimiter, RowsExt};
 use std::error::Error;
+use sweet_async_tokio::task::{AsyncTask, CsvRecord, Delimiter, RowsExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Sweet Async CSV Processing Demo");
-    
+
     // Create test CSV data with header and records
-    let csv_content = "id,name,age,city\n1,Alice,30,Seattle\n2,Bob,25,Portland\n3,Charlie,35,Vancouver";
+    let csv_content =
+        "id,name,age,city\n1,Alice,30,Seattle\n2,Bob,25,Portland\n3,Charlie,35,Vancouver";
     std::fs::write("data.csv", csv_content)?;
     println!("Created test CSV file with 3 records");
 
     // Process CSV using the exact README syntax with zero-allocation design
     let csv_records = AsyncTask::emits::<CsvRecord>()
         .sender(|collector| {
-            collector.of("data.csv")
+            collector
+                .of("data.csv")
                 .with_delimiter(Delimiter::NewLine)
                 .into_chunks(100.rows());
         })
@@ -24,17 +26,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 collector.collect(record.id.to_string(), record.clone());
             }
         })
-        .await_final_event(|_event, collector| {
-            collector.collected()
-        });
+        .await_final_event(|_event, collector| collector.collected());
 
     // Display processing results
-    println!("\n✅ Successfully processed {} CSV records:", csv_records.len());
-    
+    println!(
+        "\n✅ Successfully processed {} CSV records:",
+        csv_records.len()
+    );
+
     for (key, record) in &csv_records {
-        println!("📄 Record '{}': {} fields at line {}", 
-                 key, record.field_count(), record.line_number);
-        
+        println!(
+            "📄 Record '{}': {} fields at line {}",
+            key,
+            record.field_count(),
+            record.line_number
+        );
+
         // Show field details
         for (i, field) in record.data.iter().enumerate() {
             println!("   Field {}: '{}'", i, field);
@@ -66,6 +73,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Clean up test file
     std::fs::remove_file("data.csv").ok();
     println!("\n🧹 Cleaned up test files");
-    
+
     Ok(())
 }

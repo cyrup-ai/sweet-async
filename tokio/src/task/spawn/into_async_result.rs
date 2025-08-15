@@ -1,7 +1,19 @@
-//! Implementation of the IntoAsyncResult trait for Tokio
-//!
-//! This module provides Tokio-specific implementations of the IntoAsyncResult trait.
-//! It's used to convert various result types to a standardized format.
+//! Tokio implementation of IntoAsyncResult trait
 
-// Re-export the API trait
-pub use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
+use std::future::Future;
+use std::pin::Pin;
+use sweet_async_api::AsyncTaskError;
+use sweet_async_api::task::spawn::into_async_result::IntoAsyncResult;
+
+/// Newtype wrapper to avoid orphan rule violations
+#[derive(Debug, Clone)]
+pub struct TokioIntoAsyncResult<T>(pub T);
+
+impl<T> IntoAsyncResult<T, AsyncTaskError> for TokioIntoAsyncResult<T>
+where
+    T: Send + 'static,
+{
+    fn into_async_result(self) -> Pin<Box<dyn Future<Output = Result<T, AsyncTaskError>> + Send>> {
+        Box::pin(async move { Ok(self.0) })
+    }
+}

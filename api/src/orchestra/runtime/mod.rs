@@ -1,6 +1,5 @@
 mod builder;
-mod runtime_trait;
+mod orchestra_runtime;
 
 pub use builder::*;
-pub use runtime_trait::*;
-
+pub use orchestra_runtime::*;

@@ -17,4 +17,4 @@ where
     T: Ord + Copy + Clone,
 {
     fn sequence_id(&self) -> T;
-} 
+}

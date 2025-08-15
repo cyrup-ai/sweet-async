@@ -24,21 +24,36 @@ pub enum AsyncTaskError {
 
     #[error("Invalid task state: {0}")]
     InvalidState(String),
-    
+
     #[error("Invalid data format")]
     InvalidData,
 
+    #[error("Invalid schedule configuration")]
+    InvalidSchedule,
+
     #[error("Key version too old, minimum required: {0}")]
     KeyVersionTooOld(u8),
-    
+
     #[error("Recovery failed: {0}")]
     RecoveryFailed(String),
-    
+
     #[error("IO error: {0}")]
     Io(String),
 
     #[error("Unknown error: {0}")]
     Unknown(String),
+}
+
+impl AsyncTaskError {
+    /// Check if this error is a timeout error
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, AsyncTaskError::Timeout(_))
+    }
+
+    /// Check if this error is a cancellation error
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, AsyncTaskError::Cancelled)
+    }
 }
 
 impl From<std::io::Error> for AsyncTaskError {

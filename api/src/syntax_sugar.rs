@@ -7,31 +7,37 @@ macro_rules! __sweet_flag {
     // Flag with bool argument
     ($trait_name:ident, $fn_name:ident, $arg:ty) => {
         pub trait $trait_name: Sized {
-            fn $fn_name(self, _arg: $arg) -> Self { self }
+            fn $fn_name(self, _arg: $arg) -> Self {
+                self
+            }
         }
         impl<T> $trait_name for T {}
     };
     // Flag with no argument
     ($trait_name:ident, $fn_name:ident) => {
         pub trait $trait_name: Sized {
-            fn $fn_name(self) -> Self { self }
+            fn $fn_name(self) -> Self {
+                self
+            }
         }
         impl<T> $trait_name for T {}
     };
 }
 
 // ── Task-builder level sugar ────────────────────────────────────────────────
-__sweet_flag!(WithAutoScaling,  with_auto_scaling, bool);
-__sweet_flag!(LambdaExec,       lambda);
-__sweet_flag!(FallbackVercel,   fallback_to_vercel);
-__sweet_flag!(FallbackLocal,    fallback_to_local);
-__sweet_flag!(VectorClocked,    with_vector_clock,  Vec<()>);
-__sweet_flag!(CircuitBroken,    with_circuit_breaker, ());
-__sweet_flag!(HurlDsl,          hurl);
+__sweet_flag!(WithAutoScaling, with_auto_scaling, bool);
+__sweet_flag!(LambdaExec, lambda);
+__sweet_flag!(FallbackVercel, fallback_to_vercel);
+__sweet_flag!(FallbackLocal, fallback_to_local);
+__sweet_flag!(VectorClocked, with_vector_clock, Vec<()>);
+__sweet_flag!(CircuitBroken, with_circuit_breaker, ());
+__sweet_flag!(HurlDsl, hurl);
 
 // await_result must remain `async`; we expose a stub that just returns self.
 pub trait AwaitResult: Sized {
-    fn await_result<B, H>(self, _body: B, _handler: H) -> Self { self }
+    fn await_result<B, H>(self, _body: B, _handler: H) -> Self {
+        self
+    }
 }
 impl<T> AwaitResult for T {}
 

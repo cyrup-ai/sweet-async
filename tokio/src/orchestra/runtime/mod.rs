@@ -1,9 +1,11 @@
-//! Runtime module for Tokio implementation
+//! Tokio implementation of orchestra runtime module
 //!
-//! This module provides runtime abstractions matching the API structure
+//! This module provides Tokio implementations that exactly match
+//! the orchestra runtime module structure defined in the API.
 
 pub mod builder;
-pub mod runtime_trait;
+pub mod orchestra_runtime;
 
-pub use builder::TokioRuntimeBuilder;
-pub use runtime_trait::TokioRuntime;
+// Re-exports with Tokio prefix
+pub use builder::TokioOrchestraRuntimeBuilder;
+pub use orchestra_runtime::TokioOrchestraRuntime;

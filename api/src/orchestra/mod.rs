@@ -1,9 +1,9 @@
 pub mod orchestrator;
-pub use orchestrator::OrchestratorError;
+pub use orchestrator::{OrchestratorError, TaskOrchestrator};
 pub mod runtime;
 pub use runtime::*;
 
-use crate::orchestra::orchestrator::TaskOrchestrator;
+// TaskOrchestrator is now publicly exported above
 use crate::task::AsyncTask;
 use crate::task::builder::AsyncTaskBuilder;
 use crate::task::{TaskId, TaskPriority};

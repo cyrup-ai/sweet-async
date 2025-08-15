@@ -139,6 +139,76 @@ let result = builder.run(my_work).await;  // Async execution via .await
 
 This pattern allows better trait composition than `async fn` while being 100% async.
 
+## 🚨 CRITICAL: Execution Flow Understanding 🚨
+
+### NOTHING EXECUTES UNTIL POLLED!
+
+The execution flow is fundamentally lazy:
+
+1. **Builder methods** (`.timeout()`, `.retry()`, etc.) - Just configure, NO execution
+2. **`run()` method** - Creates task, returns Future, **NO EXECUTION YET**
+3. **`.await` or polling** - **THIS IS WHEN EXECUTION HAPPENS**
+
+### Common Mistakes to Avoid:
+
+❌ **WRONG**: Spawning work during task construction
+```rust
+// WRONG - spawns immediately during construction
+fn from_work() -> Self {
+    let handle = tokio::spawn(async { work.run().await });  // NO! Executes immediately!
+    Self { handle, ... }
+}
+```
+
+✅ **CORRECT**: Store work, spawn only when polled
+```rust
+// CORRECT - lazy execution
+fn from_work() -> Self {
+    Self { work: Some(work), handle: None, ... }  // Just store it
+}
+
+impl Future for Task {
+    fn poll(...) {
+        if let Some(work) = self.work.take() {
+            // NOW spawn using self.runtime()
+            self.handle = Some(self.runtime().spawn(work));
+        }
+        // Poll the handle
+    }
+}
+```
+
+### Runtime Access Rules:
+
+1. **ONLY access runtime through `runtime()` method** - This is the API
+   - ✅ `self.runtime().spawn(...)` - Uses the trait method
+   - ❌ `self.runtime.spawn(...)` - Direct field access
+   - ❌ `tokio::spawn(...)` - Bypasses abstraction
+
+2. **NO Handle parameters** - Tasks are self-contained
+   - ❌ `fn new(handle: tokio::runtime::Handle)` - NO!
+   - ✅ `fn new()` - Task creates/gets its own runtime internally
+
+3. **Runtime is available via trait** - Every AsyncTask has `runtime()`
+   - Provided by `ContextualizedTask` trait
+   - Returns `&Self::RuntimeType`
+   - Task stores runtime internally, provides via method
+
+### The `run()` Method is Universal:
+
+`run()` is THE execution point where:
+- All configuration is applied
+- Task is created with all settings
+- Orchestra/Runtime is obtained (via thread-local or default)
+- Future is returned (but NOT yet executed)
+
+`await_result()` is just sugar that:
+1. Calls `self.run(work)` to get the Future
+2. Polls that Future to completion
+3. Returns the result
+
+Everything flows through `run()` - it's the universal method that bridges configuration to execution.
+
 ### Dependencies
 
 The crate depends on:

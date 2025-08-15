@@ -57,7 +57,13 @@
       "Bash(for trait in \"ComparatorSequence\" \"IdSequence\" \"SizeExt\" \"TimeExt\" \"TimestampSequence\")",
       "Bash(do echo \"=== $trait ===\")",
       "Bash(done)",
-      "Bash(for trait in \"StreamingEvent\" \"Collector\" \"SenderEvent\" \"ReceiverEvent\" \"FinalEvent\")"
+      "Bash(for trait in \"StreamingEvent\" \"Collector\" \"SenderEvent\" \"ReceiverEvent\" \"FinalEvent\")",
+      "mcp__desktop-commander__create_directory",
+      "mcp__desktop-commander__read_multiple_files",
+      "Bash(for:*)",
+      "Bash(do echo \"=== $file ===\")",
+      "mcp__desktop-commander__move_file",
+      "mcp__desktop-commander__move_file"
     ],
     "deny": []
   },

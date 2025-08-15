@@ -1,5 +1,4 @@
-use std::time::Duration;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 pub trait TimedTask<T: Send + 'static> {
     fn created_timestamp(&self) -> SystemTime;
