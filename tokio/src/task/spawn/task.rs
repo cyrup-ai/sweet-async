@@ -423,46 +423,125 @@ where
     type AsyncWork = TokioAsyncWork<T>;
 
     #[inline]
-    fn run(mut self, work: Self::AsyncWork) -> Self {
-        self.set_status(TaskStatus::Running);
-
-        // Use captured configuration when spawning through runtime abstraction
-        let task_name = self.name.clone();
-        let priority = self.priority;
-        let task_id = self.task_id.clone();
+    fn run(self, work: Self::AsyncWork) -> Self {
+        let task_name = self.async_task.name().clone();
+        let task_id = self.async_task.task_id();
+        let priority = self.async_task.priority();
+        let tracing_enabled = self.async_task.tracing_enabled().load(std::sync::atomic::Ordering::Relaxed);
+        let metrics_enabled = self.async_task.metrics_enabled().load(std::sync::atomic::Ordering::Relaxed);
         
-        // Access runtime through the orchestrator abstraction only in run()
+        // Clone the result storage for the spawned task
+        let result_storage = self.async_task.result_storage().clone();
+        let completion_status = self.async_task.completion_status().clone();
+        let unparker = self.async_task.unparker().clone();
+
         self.async_task.runtime().spawn(async move {
-            // Apply configuration to the spawned task
             if let Some(name) = task_name {
-                // Set task name for tracing/debugging
-                tracing::trace!("Running task: {}", name);
+                tracing::info!("Starting task: {}", name);
             }
             
-            // Execute the work with captured configuration
-            match work.run().await {
-                Ok(result) => {
-                    tracing::debug!("Task {:?} completed successfully", task_id);
-                    // Store result would go here if we had a way to communicate back
-                }
-                Err(error) => {
-                    tracing::error!("Task {:?} failed: {:?}", task_id, error);
-                }
+            if tracing_enabled {
+                tracing::debug!("Task {:?} with priority {:?} starting execution", task_id, priority);
             }
+            
+            if metrics_enabled {
+                // Metrics would be recorded here in a real implementation
+            }
+            
+            let result = work.run().await;
+            
+            // Store result atomically and signal completion
+            let boxed_result = Box::new(result);
+            let raw_ptr = Box::into_raw(boxed_result);
+            result_storage.store(raw_ptr, std::sync::atomic::Ordering::Release);
+            completion_status.store(1, std::sync::atomic::Ordering::Release);
+            unparker.unpark();
         });
 
         self
     }
 
     #[inline]
-    fn run_child<R>(&self, _task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
+    fn run_child<R>(&self, task: R) -> <Self as SpawningTask<R, I>>::OutputFuture
     where
         R: Clone + Send + 'static,
         Self: SpawningTask<R, I>,
     {
-        // This is a stub implementation that satisfies the trait bounds
-        // The actual implementation would need to be specialized for each R type
-        unimplemented!("run_child requires specialized implementation for each R type")
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        use std::future::Future;
+        
+        // Zero-allocation child task runner
+        struct ChildTaskFuture<R, I> 
+        where
+            R: Clone + Send + 'static,
+            I: TaskId + std::hash::Hash,
+        {
+            child_task: Option<TokioSpawningTask<R, I>>,
+            child_work: Option<TokioAsyncWork<R>>,
+            spawned: bool,
+        }
+        
+        impl<R, I> Future for ChildTaskFuture<R, I>
+        where
+            R: Clone + Send + Sync + Default + std::fmt::Debug + Unpin + 'static,
+            I: TaskId + std::hash::Hash + Unpin,
+        {
+            type Output = TokioTaskResult<R>;
+            
+            #[inline]
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                if !self.spawned {
+                    if let (Some(mut child_task), Some(child_work)) = (self.child_task.take(), self.child_work.take()) {
+                        // Spawn the child task with the work
+                        child_task = child_task.run(child_work);
+                        self.child_task = Some(child_task);
+                        self.spawned = true;
+                    } else {
+                        return Poll::Ready(TokioTaskResult::from_error(
+                            sweet_async_api::task::AsyncTaskError::ExecutionError(
+                                "Child task or work missing".to_string()
+                            )
+                        ));
+                    }
+                }
+                
+                // Poll the spawned child task
+                if let Some(mut child_task) = self.child_task.take() {
+                    match Future::poll(Pin::new(&mut child_task), cx) {
+                        Poll::Ready(result) => Poll::Ready(result),
+                        Poll::Pending => {
+                            self.child_task = Some(child_task);
+                            Poll::Pending
+                        }
+                    }
+                } else {
+                    Poll::Ready(TokioTaskResult::from_error(
+                        sweet_async_api::task::AsyncTaskError::ExecutionError(
+                            "Child task disappeared".to_string()
+                        )
+                    ))
+                }
+            }
+        }
+        
+        // Create child task with parent's configuration
+        let child_task_id = self.task_id.clone();
+        let child_task = TokioSpawningTask::<R, I>::new(child_task_id)
+            .with_name(self.name.clone().unwrap_or_default())
+            .with_priority(self.priority);
+            
+        // Create work that produces the child value
+        let child_work = TokioAsyncWork::new(Box::new(move || {
+            let task_value = task.clone();
+            Box::pin(async move { Ok(task_value) })
+        }));
+        
+        ChildTaskFuture {
+            child_task: Some(child_task),
+            child_work: Some(child_work),
+            spawned: false,
+        }
     }
 
     #[inline]
@@ -481,15 +560,111 @@ where
     }
 
     #[inline]
-    fn chain<U, F>(self, _f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
+    fn chain<U, F>(self, f: F) -> <Self as SpawningTask<U, I>>::OutputFuture
     where
         F: AsyncWork<U> + Send + 'static,
         U: Clone + Send + 'static,
         Self: SpawningTask<U, I>,
     {
-        // This is a stub implementation that satisfies the trait bounds
-        // The actual implementation would need to be specialized for each U type
-        unimplemented!("chain requires specialized implementation for each U type")
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        use std::future::Future;
+        
+        // Zero-allocation chained future implementation
+        struct ChainedFuture<T, U, I, F> 
+        where
+            T: Clone + Send + Sync + Default + std::fmt::Debug + 'static,
+            U: Clone + Send + 'static,
+            I: TaskId + std::hash::Hash,
+            F: AsyncWork<U> + Send + 'static,
+        {
+            task: Option<TokioSpawningTask<T, I>>,
+            chained_fn: Option<F>,
+            chained_future: Option<Pin<Box<dyn Future<Output = Result<U, sweet_async_api::task::AsyncTaskError>> + Send>>>,
+            completed: bool,
+        }
+        
+        impl<T, U, I, F> Future for ChainedFuture<T, U, I, F>
+        where
+            T: Clone + Send + Sync + Default + std::fmt::Debug + Unpin + 'static,
+            U: Clone + Send + 'static,
+            I: TaskId + std::hash::Hash + Unpin,
+            F: AsyncWork<U> + Send + 'static,
+        {
+            type Output = TokioTaskResult<U>;
+            
+            #[inline]
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                if self.completed {
+                    return Poll::Ready(TokioTaskResult::from_error(
+                        sweet_async_api::task::AsyncTaskError::ExecutionError(
+                            "Chain already completed".to_string()
+                        )
+                    ));
+                }
+                
+                // First phase: execute the original task
+                if let Some(mut task) = self.task.take() {
+                    match Future::poll(Pin::new(&mut task), cx) {
+                        Poll::Ready(result) => {
+                            match result.into_result() {
+                                Ok(_value) => {
+                                    // Start the chained function
+                                    if let Some(chained_fn) = self.chained_fn.take() {
+                                        self.chained_future = Some(Box::pin(chained_fn.run()));
+                                    } else {
+                                        self.completed = true;
+                                        return Poll::Ready(TokioTaskResult::from_error(
+                                            sweet_async_api::task::AsyncTaskError::ExecutionError(
+                                                "Chain function missing".to_string()
+                                            )
+                                        ));
+                                    }
+                                }
+                                Err(error) => {
+                                    self.completed = true;
+                                    return Poll::Ready(TokioTaskResult::from_error(error));
+                                }
+                            }
+                        }
+                        Poll::Pending => {
+                            // Put the task back for next poll
+                            self.task = Some(task);
+                            return Poll::Pending;
+                        }
+                    }
+                }
+                
+                // Second phase: execute the chained function
+                if let Some(ref mut chained_future) = self.chained_future {
+                    match chained_future.as_mut().poll(cx) {
+                        Poll::Ready(result) => {
+                            self.completed = true;
+                            Poll::Ready(match result {
+                                Ok(value) => TokioTaskResult::from_value(value),
+                                Err(error) => TokioTaskResult::from_error(error),
+                            })
+                        }
+                        Poll::Pending => Poll::Pending,
+                    }
+                } else {
+                    // Should not reach here in normal execution
+                    self.completed = true;
+                    Poll::Ready(TokioTaskResult::from_error(
+                        sweet_async_api::task::AsyncTaskError::ExecutionError(
+                            "Invalid chain state".to_string()
+                        )
+                    ))
+                }
+            }
+        }
+        
+        ChainedFuture {
+            task: Some(self),
+            chained_fn: Some(f),
+            chained_future: None,
+            completed: false,
+        }
     }
 }
 

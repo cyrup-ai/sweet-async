@@ -28,6 +28,10 @@ pub struct TokioAsyncTask<T, I> {
     timed_task: TokioTimedTask,
     context: TokioTaskContext<T, I>,
     value: Option<T>,
+    result_storage: std::sync::Arc<std::sync::atomic::AtomicPtr<TokioTaskResult<T>>>,
+    parker: crossbeam_utils::sync::Parker,
+    unparker: crossbeam_utils::sync::Unparker,
+    completion_status: std::sync::atomic::AtomicU8,
     pub fallback_work: TokioFallbackWork<T>,
     max_retries: u8,
     current_retry: AtomicU8,
@@ -43,6 +47,9 @@ where
 {
     #[inline]
     pub fn new(task_id: I) -> Self {
+        let parker = crossbeam_utils::sync::Parker::new();
+        let unparker = parker.unparker().clone();
+        
         Self {
             task_id,
             name: None,
@@ -54,6 +61,39 @@ where
             timed_task: TokioTimedTask::new(),
             context: TokioTaskContext::<T, I>::new(task_id),
             value: None,
+            result_storage: std::sync::Arc::new(std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())),
+            parker,
+            unparker,
+            completion_status: std::sync::atomic::AtomicU8::new(0),
+            fallback_work: TokioFallbackWork::new(None),
+            max_retries: 3,
+            current_retry: AtomicU8::new(0),
+            cpu_usage: TokioCpuUsage::new(),
+            memory_usage: TokioMemoryUsage::new(),
+            io_usage: TokioIoUsage::new(),
+        }
+    }
+
+    #[inline]
+    pub fn new_with_name(task_id: I, name: String) -> Self {
+        let parker = crossbeam_utils::sync::Parker::new();
+        let unparker = parker.unparker().clone();
+        
+        Self {
+            task_id,
+            name: Some(name),
+            priority: TaskPriority::Normal,
+            status: AtomicU8::new(TaskStatus::Pending as u8),
+            is_cancelled: AtomicBool::new(false),
+            tracing_enabled: AtomicBool::new(false),
+            metrics_enabled: AtomicBool::new(false),
+            timed_task: TokioTimedTask::new(),
+            context: TokioTaskContext::<T, I>::new(task_id),
+            value: None,
+            result_storage: std::sync::Arc::new(std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())),
+            parker,
+            unparker,
+            completion_status: std::sync::atomic::AtomicU8::new(0),
             fallback_work: TokioFallbackWork::new(None),
             max_retries: 3,
             current_retry: AtomicU8::new(0),
@@ -65,6 +105,9 @@ where
 
     #[inline]
     pub fn with_value(task_id: I, value: T) -> Self {
+        let parker = crossbeam_utils::sync::Parker::new();
+        let unparker = parker.unparker().clone();
+        
         Self {
             task_id,
             name: None,
@@ -76,12 +119,112 @@ where
             timed_task: TokioTimedTask::new(),
             context: TokioTaskContext::<T, I>::new(task_id),
             value: Some(value.clone()),
+            result_storage: std::sync::Arc::new(std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())),
+            parker,
+            unparker,
+            completion_status: std::sync::atomic::AtomicU8::new(0),
             fallback_work: TokioFallbackWork::new(Some(value)),
             max_retries: 3,
             current_retry: AtomicU8::new(0),
             cpu_usage: TokioCpuUsage::new(),
             memory_usage: TokioMemoryUsage::new(),
             io_usage: TokioIoUsage::new(),
+        }
+    }
+
+
+    /// Get task name
+    pub fn name(&self) -> &Option<String> {
+        &self.name
+    }
+
+    /// Get task ID
+    pub fn task_id(&self) -> I {
+        self.task_id
+    }
+
+    /// Get task priority
+    pub fn priority(&self) -> TaskPriority {
+        self.priority
+    }
+
+    /// Get result storage reference
+    pub fn result_storage(&self) -> &std::sync::Arc<std::sync::atomic::AtomicPtr<TokioTaskResult<T>>> {
+        &self.result_storage
+    }
+
+    /// Get completion status reference
+    pub fn completion_status(&self) -> &std::sync::atomic::AtomicU8 {
+        &self.completion_status
+    }
+
+    /// Get unparker reference
+    pub fn unparker(&self) -> &crossbeam_utils::sync::Unparker {
+        &self.unparker
+    }
+
+    /// Get tracing enabled status
+    pub fn tracing_enabled(&self) -> &std::sync::atomic::AtomicBool {
+        &self.tracing_enabled
+    }
+
+    /// Get metrics enabled status
+    pub fn metrics_enabled(&self) -> &std::sync::atomic::AtomicBool {
+        &self.metrics_enabled
+    }
+
+    /// Store the result atomically and signal completion
+    pub fn store_result(&self, result: TokioTaskResult<T>) {
+        let boxed_result = Box::new(result);
+        let raw_ptr = Box::into_raw(boxed_result);
+        self.result_storage.store(raw_ptr, std::sync::atomic::Ordering::Release);
+        self.completion_status.store(1, std::sync::atomic::Ordering::Release);
+        self.unparker.unpark();
+    }
+
+    /// Try to get the result without blocking (non-blocking poll)
+    pub fn try_get_result(&self) -> Option<TokioTaskResult<T>> {
+        if self.completion_status.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            return None;
+        }
+        
+        let ptr = self.result_storage.load(std::sync::atomic::Ordering::Acquire);
+        if ptr.is_null() {
+            return None;
+        }
+        
+        // Safety: We only store valid Box pointers and check completion status
+        let boxed_result = unsafe { Box::from_raw(ptr) };
+        Some(*boxed_result)
+    }
+
+    /// Wait for the result with backoff and parking (blocking poll)
+    pub fn await_result(&self) -> TokioTaskResult<T> {
+        // Fast path: check if result is already available
+        if let Some(result) = self.try_get_result() {
+            return result;
+        }
+
+        // Backoff strategy similar to async-stream
+        let mut backoff_count = 0;
+        const MAX_BACKOFF: u32 = 6;
+        
+        loop {
+            // Try again after backoff
+            if let Some(result) = self.try_get_result() {
+                return result;
+            }
+            
+            // Exponential backoff with parking
+            if backoff_count < MAX_BACKOFF {
+                for _ in 0..(1 << backoff_count) {
+                    std::hint::spin_loop();
+                }
+                backoff_count += 1;
+            } else {
+                // Park until signaled
+                self.parker.park();
+            }
         }
     }
 
