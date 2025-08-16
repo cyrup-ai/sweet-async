@@ -80,11 +80,15 @@ use sweet_async_api::task::{
 };
 
 /// Zero-allocation spawning task implementation
-#[derive(Debug)]
 pub struct TokioSpawningTask<T, I> {
     task_id: I,
     async_task: TokioAsyncTask<T, I>,
     value: Option<T>,
+    work: Option<TokioAsyncWork<T>>,
+    work_future: Option<Pin<Box<dyn Future<Output = T> + Send>>>,
+    parent: Option<Arc<dyn ContextualizedTask<T, I, 
+                   RuntimeType = TokioOrchestraRuntime<T, I>,
+                   RelationshipsType = TokioTaskRelationships<T, I>> + Send + Sync>>,
     name: Option<String>,
     status: AtomicU8,
     is_cancelled: AtomicBool,
@@ -102,6 +106,9 @@ where
             task_id,
             async_task: TokioAsyncTask::new(task_id),
             value: None,
+            work: None,
+            work_future: None,
+            parent: None,
             name: None,
             status: AtomicU8::new(TaskStatus::Pending as u8),
             is_cancelled: AtomicBool::new(false),
@@ -115,6 +122,9 @@ where
             task_id,
             async_task: TokioAsyncTask::new(task_id),
             value: Some(value),
+            work: None,
+            work_future: None,
+            parent: None,
             name: None,
             status: AtomicU8::new(TaskStatus::Pending as u8),
             is_cancelled: AtomicBool::new(false),
@@ -301,8 +311,14 @@ where
 
     #[inline]
     fn runtime(&self) -> &Self::RuntimeType {
-        // Runtime is created on-demand when needed, not stored in struct
-        panic!("Runtime should be accessed through tokio::runtime::Handle::current() in run() method")
+        if let Some(ref parent) = self.parent {
+            // Recursively traverse parent chain
+            parent.runtime()
+        } else {
+            // Error: Task without parent should never exist in production
+            // The orchestrator creation should happen in Future::poll()
+            panic!("Task runtime accessed before orchestrator creation - this indicates a bug in lazy orchestrator initialization")
+        }
     }
 
     #[inline]
@@ -423,41 +439,12 @@ where
     type AsyncWork = TokioAsyncWork<T>;
 
     #[inline]
-    fn run(self, work: Self::AsyncWork) -> Self {
-        let task_name = self.async_task.name().clone();
-        let task_id = self.async_task.task_id();
-        let priority = self.async_task.priority();
-        let tracing_enabled = self.async_task.tracing_enabled().load(std::sync::atomic::Ordering::Relaxed);
-        let metrics_enabled = self.async_task.metrics_enabled().load(std::sync::atomic::Ordering::Relaxed);
+    fn run(mut self, work: Self::AsyncWork) -> Self {
+        // Store the work to be executed when the task is polled
+        // The actual spawning happens through the runtime when polled
+        self.work = Some(work);
         
-        // Clone the result storage for the spawned task
-        let result_storage = self.async_task.result_storage().clone();
-        let completion_status = self.async_task.completion_status().clone();
-        let unparker = self.async_task.unparker().clone();
-
-        self.async_task.runtime().spawn(async move {
-            if let Some(name) = task_name {
-                tracing::info!("Starting task: {}", name);
-            }
-            
-            if tracing_enabled {
-                tracing::debug!("Task {:?} with priority {:?} starting execution", task_id, priority);
-            }
-            
-            if metrics_enabled {
-                // Metrics would be recorded here in a real implementation
-            }
-            
-            let result = work.run().await;
-            
-            // Store result atomically and signal completion
-            let boxed_result = Box::new(result);
-            let raw_ptr = Box::into_raw(boxed_result);
-            result_storage.store(raw_ptr, std::sync::atomic::Ordering::Release);
-            completion_status.store(1, std::sync::atomic::Ordering::Release);
-            unparker.unpark();
-        });
-
+        // Return self to be spawned by the runtime
         self
     }
 
@@ -498,7 +485,7 @@ where
                         self.child_task = Some(child_task);
                         self.spawned = true;
                     } else {
-                        return Poll::Ready(TokioTaskResult::from_error(
+                        return Poll::Ready(TokioTaskResult::err(
                             sweet_async_api::task::AsyncTaskError::ExecutionError(
                                 "Child task or work missing".to_string()
                             )
@@ -516,7 +503,7 @@ where
                         }
                     }
                 } else {
-                    Poll::Ready(TokioTaskResult::from_error(
+                    Poll::Ready(TokioTaskResult::err(
                         sweet_async_api::task::AsyncTaskError::ExecutionError(
                             "Child task disappeared".to_string()
                         )
@@ -614,7 +601,7 @@ where
                                         self.chained_future = Some(Box::pin(chained_fn.run()));
                                     } else {
                                         self.completed = true;
-                                        return Poll::Ready(TokioTaskResult::from_error(
+                                        return Poll::Ready(TokioTaskResult::err(
                                             sweet_async_api::task::AsyncTaskError::ExecutionError(
                                                 "Chain function missing".to_string()
                                             )
@@ -623,7 +610,7 @@ where
                                 }
                                 Err(error) => {
                                     self.completed = true;
-                                    return Poll::Ready(TokioTaskResult::from_error(error));
+                                    return Poll::Ready(TokioTaskResult::err(error));
                                 }
                             }
                         }
@@ -641,8 +628,8 @@ where
                         Poll::Ready(result) => {
                             self.completed = true;
                             Poll::Ready(match result {
-                                Ok(value) => TokioTaskResult::from_value(value),
-                                Err(error) => TokioTaskResult::from_error(error),
+                                Ok(value) => TokioTaskResult::ok(value),
+                                Err(error) => TokioTaskResult::err(error),
                             })
                         }
                         Poll::Pending => Poll::Pending,
@@ -650,7 +637,7 @@ where
                 } else {
                     // Should not reach here in normal execution
                     self.completed = true;
-                    Poll::Ready(TokioTaskResult::from_error(
+                    Poll::Ready(TokioTaskResult::err(
                         sweet_async_api::task::AsyncTaskError::ExecutionError(
                             "Invalid chain state".to_string()
                         )
@@ -680,14 +667,60 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.get_mut();
-        // Cannot use tokio directly - must use runtime abstraction
-        if let Some(value) = &this.value {
-            // Fallback to immediate value if no handle
-            std::task::Poll::Ready(TokioTaskResult::ok(value.clone()))
+        
+        // First poll: create orchestrator if needed and spawn work
+        if this.work_future.is_none() {
+            // Create orchestrator parent if no parent exists
+            if this.parent.is_none() {
+                use crate::orchestra::orchestrator_task::TokioOrchestratorTask;
+                this.parent = Some(TokioOrchestratorTask::<T, I>::new() as Arc<dyn ContextualizedTask<T, I, 
+                    RuntimeType = TokioOrchestraRuntime<T, I>,
+                    RelationshipsType = TokioTaskRelationships<T, I>> + Send + Sync>);
+            }
+            
+            // Now spawn the actual work using parent's runtime
+            if let Some(work) = this.work.take() {
+                let runtime = this.runtime();
+                let future = runtime.runtime_handle.spawn(async move {
+                    work.run().await
+                });
+                
+                // Store the spawned future
+                this.work_future = Some(Box::pin(async move {
+                    match future.await {
+                        Ok(result) => result,
+                        Err(join_err) => {
+                            // JoinError means task panicked or was cancelled
+                            panic!("Task execution failed: {}", join_err)
+                        }
+                    }
+                }));
+            } else if let Some(ref value) = this.value {
+                // Direct value, no work to spawn
+                return std::task::Poll::Ready(TokioTaskResult::ok(value.clone()));
+            } else {
+                return std::task::Poll::Ready(TokioTaskResult::err(
+                    AsyncTaskError::Failure("No work or value available".to_string())
+                ));
+            }
+        }
+        
+        // Poll the spawned work
+        if let Some(ref mut work_future) = this.work_future {
+            match work_future.as_mut().poll(cx) {
+                std::task::Poll::Ready(result) => {
+                    this.set_status(TaskStatus::Completed);
+                    std::task::Poll::Ready(TokioTaskResult::ok(result))
+                }
+                std::task::Poll::Pending => {
+                    this.set_status(TaskStatus::Running);
+                    std::task::Poll::Pending
+                }
+            }
         } else {
-            std::task::Poll::Ready(TokioTaskResult::err(AsyncTaskError::Failure(
-                "No value or handle available".to_string(),
-            )))
+            std::task::Poll::Ready(TokioTaskResult::err(
+                AsyncTaskError::Failure("Work future disappeared".to_string())
+            ))
         }
     }
 }

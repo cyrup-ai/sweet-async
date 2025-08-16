@@ -63,7 +63,9 @@
       "Bash(for:*)",
       "Bash(do echo \"=== $file ===\")",
       "mcp__desktop-commander__move_file",
-      "mcp__desktop-commander__move_file"
+      "mcp__desktop-commander__move_file",
+      "Bash(CARGO_INCREMENTAL=0 cargo check -p sweet_async_tokio --message-format=short)",
+      "Bash(CARGO_INCREMENTAL=0 cargo check --package sweet_async_tokio --message-format=short)"
     ],
     "deny": []
   },

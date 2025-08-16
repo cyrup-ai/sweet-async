@@ -6,6 +6,7 @@ use sweet_async_api::orchestra::{OrchestratorBuilder, TaskOrchestrator};
 use sweet_async_api::task::AsyncTask;
 
 pub mod runtime;
+pub mod orchestrator_task;
 
 /// Zero-allocation orchestra builder that stores configuration for run()
 #[derive(Debug)]

@@ -32,7 +32,7 @@ macro_rules! impl_default_context {
             }
 
             fn runtime(&self) -> &Self::RuntimeType {
-                unimplemented!("Runtime must be provided by concrete implementation")
+                &self.context.runtime
             }
 
             fn cwd(&self) -> std::path::PathBuf {

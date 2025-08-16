@@ -47,6 +47,7 @@ cryypt_quic = { optional = true, path = "../../cryypt/quic"}
 surrealdb = { version = "2.1", optional = true, default-features = false }
 parking_lot = "0.12.4"
 serde = { version = "1.0.219", features = ["derive"] }
+crossbeam-utils = "0.8"
 
 [features]
 default = []

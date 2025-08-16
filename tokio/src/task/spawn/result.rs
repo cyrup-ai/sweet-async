@@ -5,8 +5,7 @@ use std::task::{Context, Poll};
 use sweet_async_api::task::AsyncWork;
 use sweet_async_api::task::spawn::{AsyncResult, TaskResult};
 use sweet_async_api::task::task_error::AsyncTaskError;
-// Cannot use tokio directly - must use runtime abstraction
-// use tokio::task::JoinHandle;
+use tokio::task::JoinHandle;
 
 /// A task result implementation for Tokio-based async tasks
 #[derive(Debug)]

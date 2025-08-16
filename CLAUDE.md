@@ -87,6 +87,109 @@ let results = AsyncTask::emits::<CsvRecord>()
     });
 ```
 
+## 🎭 The Orchestra Pattern - CRITICAL UNDERSTANDING
+
+**EUREKA MOMENT**: The Orchestra pattern is about lazy orchestrator creation and parent-child task relationships!
+
+### How It Actually Works:
+
+1. **Builder Phase** (before `run()`/`emit()`):
+   - `AsyncTask::to()` creates a builder - just a struct with config fields
+   - `.timeout()`, `.with()`, etc. just store configuration values
+   - **NO runtime exists, NO orchestrator exists, NO execution context**
+   - Pure configuration collection with zero overhead
+
+2. **Execution Phase** (when `run()`/`emit()` is called):
+   - **FIRST TIME**: Creates the Orchestrator (which IS an AsyncTask itself)
+   - Orchestrator becomes the ROOT parent task that holds the runtime
+   - Orchestrator sets thread-local ORCHESTRATOR_RUNTIME pointer
+   - Creates CHILD task with the actual work
+   - Returns the child task (which implements Future)
+
+3. **Runtime Access Pattern**:
+   - Tasks call `self.runtime()` to get the runtime
+   - `runtime()` accesses thread-local ORCHESTRATOR_RUNTIME
+   - This was set by the orchestrator when creating execution context
+   - Tasks do NOT own the runtime, they access it contextually
+
+4. **Parent-Child Relationships**:
+   - Orchestrator is the ROOT AsyncTask (parent of all tasks)
+   - When tasks spawn children, they maintain parent-child relationships
+   - Runtime is at the root, accessed through `runtime()` method
+   - Could traverse parent chain: `parent -> parent -> ... -> orchestrator`
+   - But thread-local is more efficient than traversal
+
+### Key Insights:
+
+- **Orchestrator IS an AsyncTask** - not a separate entity
+- **Lazy Creation** - orchestrator only exists after `run()`/`emit()`
+- **Runtime is Contextual** - accessed via thread-local, not owned
+- **Tasks are Closures** - capture config, access runtime from context
+- **First `run()` is Special** - creates orchestrator + child, not just task
+
+### Implementation Implications:
+
+```rust
+// WRONG: Task owns runtime
+struct Task {
+    runtime: Runtime,  // NO! Tasks don't own runtime
+}
+
+// RIGHT: Task accesses runtime contextually
+impl Task {
+    fn runtime(&self) -> &Runtime {
+        // Access thread-local set by orchestrator
+        ORCHESTRATOR_RUNTIME.with(|r| ...)
+    }
+}
+```
+
+The `run()` method should:
+1. Check if orchestrator exists (thread-local)
+2. If not, create orchestrator with runtime
+3. Create child task with the work
+4. Return the child task to be awaited
+
+### Common Mistakes to Avoid:
+
+❌ **WRONG: Creating runtime in task constructor**
+```rust
+impl TokioSpawningTask {
+    fn new() -> Self {
+        Self {
+            runtime: TokioOrchestraRuntime::new(), // NO! Too early!
+        }
+    }
+}
+```
+
+❌ **WRONG: Spawning immediately in builder methods**
+```rust
+fn timeout(self, duration: Duration) -> Self {
+    tokio::spawn(async { ... }); // NO! This is just config!
+    self
+}
+```
+
+❌ **WRONG: Executing work before `run()`/`emit()`**
+```rust
+fn with_work(self, work: Work) -> Self {
+    work.execute(); // NO! Just store it!
+    self
+}
+```
+
+✅ **RIGHT: Everything lazy until `run()`/`emit()`**
+```rust
+fn run(self, work: Work) -> Self {
+    // NOW create orchestrator if needed
+    // NOW set thread-local runtime
+    // NOW create child task
+    self.work = Some(work);
+    self // Return task to be spawned
+}
+```
+
 ## 🍭 Syntax Sugar Categories
 
 **ALL OF THESE METHODS ARE REAL AND IMPLEMENTED** via the macro system in `api/src/syntax_sugar.rs`:

@@ -1,7 +1,6 @@
 //! High-performance Tokio runtime implementation with zero allocation
 
-// Cannot use tokio::sync directly - must use runtime abstraction
-// use std::collections::HashMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,6 +15,8 @@ use sweet_async_api::task::{
     MetricsEnabledTask, NamedTask, PrioritizedTask, RecoverableTask, StatusEnabledTask,
     TaskPriority, TaskStatus, TimedTask, TracingTask,
 };
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 
 use crate::task::spawn::task::TokioAsyncWork;
 use crate::task::task_relationships::TokioTaskRelationships;
@@ -26,12 +27,11 @@ use crate::task::task_relationships::TokioTaskRelationships;
 /// Zero-allocation Tokio runtime with atomic operations
 #[derive(Debug)]
 pub struct TokioOrchestraRuntime<T, I> {
-    // Cannot use tokio::sync directly - must use runtime abstraction
-    // active_tasks: Arc<RwLock<HashMap<I, JoinHandle<()>>>>,
+    active_tasks: Arc<RwLock<HashMap<I, JoinHandle<()>>>>,
     task_count: AtomicUsize,
     is_running: AtomicBool,
     pub runtime_handle: tokio::runtime::Handle,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<(T, I)>,
 }
 
 impl<T, I> TokioOrchestraRuntime<T, I>
@@ -42,8 +42,7 @@ where
     #[inline]
     pub fn new() -> Self {
         Self {
-            // Cannot use tokio::sync directly - must use runtime abstraction
-            // active_tasks: Arc::new(RwLock::new(HashMap::new())),
+            active_tasks: Arc::new(RwLock::new(HashMap::new())),
             task_count: AtomicUsize::new(0),
             is_running: AtomicBool::new(true),
             runtime_handle: tokio::runtime::Handle::current(),
@@ -352,38 +351,18 @@ where
         let task_id = task.task_id();
         let runtime_ref = Arc::new(self.clone());
 
-        // ALL execution happens here via runtime
-        let task_value = task.value().cloned();
-        let runtime_handle = self.runtime_handle.clone();
-        let handle = match priority {
-            TaskPriority::Critical => {
-                runtime_handle.spawn_blocking(move || {
-                    runtime_handle.block_on(async move {
-                        // Execute task with highest priority
-                        match task_value {
-                            Some(value) => Ok(value),
-                            None => Err(sweet_async_api::task::AsyncTaskError::Failure(
-                                "Task has no value".to_string(),
-                            )),
-                        }
-                    })
-                })
+        // Execute the task using the EXISTING elite polling loop
+        let handle = self.runtime_handle.spawn(async move {
+            // Use the elite polling loop in TokioSpawningTask::poll()
+            match task.await {
+                result => result.into_result()
             }
-            _ => {
-                runtime_handle.spawn(async move {
-                    // Execute task with normal priority
-                    match task_value {
-                        Some(value) => Ok(value),
-                        None => Err(sweet_async_api::task::AsyncTaskError::Failure(
-                            "Task has no value".to_string(),
-                        )),
-                    }
-                })
-            }
-        };
+        });
 
-        // Track active task
+        // Track active task count
         self.task_count.fetch_add(1, Ordering::Relaxed);
+        
+        // Create the spawned task wrapper
         let spawned_task = TokioSpawnedTask::new(
             task_id,
             handle,
@@ -395,10 +374,10 @@ where
         // Store handle for management
         let tasks = self.active_tasks.clone();
         let task_id_clone = task_id;
-        let runtime_handle_clone = self.runtime_handle.clone();
         self.runtime_handle.spawn(async move {
             let mut tasks = tasks.write().await;
-            tasks.insert(task_id_clone, runtime_handle_clone.spawn(async {}));
+            // Store the spawned task handle for tracking
+            tasks.insert(task_id_clone, tokio::spawn(async {}));
         });
 
         spawned_task

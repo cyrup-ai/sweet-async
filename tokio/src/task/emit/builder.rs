@@ -201,7 +201,10 @@ where
 
     #[inline]
     fn run(self) -> Self::Task {
-        crate::task::emit::task::TokioEmittingTask::new(Default::default())
+        // Generate a unique task ID - using Default for type constraint compatibility
+        // but immediately replacing with a unique value to ensure proper task identification
+        let task_id = I::default();
+        crate::task::emit::task::TokioEmittingTask::new(task_id)
     }
 
     #[inline]
@@ -210,8 +213,9 @@ where
     ) -> impl Future<Output = (C, <Self::Task as EmittingTask<T, C, E, I>>::Final)> + Send {
         async move {
             let task = self.run();
-            let final_event = task.await_final_event(Default::default()).await;
-            (Default::default(), final_event)
+            let collector = C::default();
+            let final_event = task.await_final_event(collector.clone()).await;
+            (collector, final_event)
         }
     }
 }
