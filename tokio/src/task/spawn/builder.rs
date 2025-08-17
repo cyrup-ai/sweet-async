@@ -2,6 +2,7 @@
 
 use crate::task::spawn::task::{TokioAsyncWork, TokioSpawningTask};
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 use sweet_async_api::task::TaskId;
 use sweet_async_api::task::builder::{AsyncTaskBuilder, AsyncWork};
@@ -153,14 +154,25 @@ where
         // First execute the work and get Result<T, E>
         let _result = self.await_result(work);
         
-        // Create a simple task to establish orchestrator context for handler
-        let task = TokioSpawningTask::<Out, I>::new(I::default());
+        // Create work that executes the handler
+        let handler_work = TokioAsyncWork::new(Arc::new(move || {
+            Box::pin(async move {
+                handler.run().await
+            })
+        }));
         
-        // Use tokio runtime directly for now - will need to fix this
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(async move {
-            // Execute handler directly
-            handler.run().await
+        // Create a task and run it using the fluent API
+        let task = TokioSpawningTask::<Out, I>::new(I::default())
+            .run(handler_work);
+        
+        // Create a runtime to execute the task
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create runtime for await_result");
+        
+        runtime.block_on(async move {
+            task.await.into_result().unwrap_or_else(|e| {
+                panic!("await_result handler failed: {:?}", e)
+            })
         })
     }
 }

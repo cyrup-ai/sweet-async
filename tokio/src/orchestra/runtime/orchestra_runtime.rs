@@ -18,7 +18,7 @@ use sweet_async_api::task::{
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use crate::task::spawn::task::TokioAsyncWork;
+use crate::task::spawn::task::{TokioAsyncWork, TokioSpawningTask};
 use crate::task::task_relationships::TokioTaskRelationships;
 // Cannot use tokio::sync directly - must use runtime abstraction
 // use tokio::sync::RwLock;
@@ -41,11 +41,26 @@ where
 {
     #[inline]
     pub fn new() -> Self {
+        // CREATE a new runtime, don't grab existing one!
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create Tokio runtime");
+        let handle = runtime.handle().clone();
+        
+        // Spawn runtime in background thread to keep it alive
+        std::thread::spawn(move || {
+            runtime.block_on(async {
+                // Keep runtime alive
+                loop {
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
+            });
+        });
+        
         Self {
             active_tasks: Arc::new(RwLock::new(HashMap::new())),
             task_count: AtomicUsize::new(0),
             is_running: AtomicBool::new(true),
-            runtime_handle: tokio::runtime::Handle::current(),
+            runtime_handle: handle,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -71,7 +86,6 @@ where
 }
 
 /// High-performance spawned task wrapper with zero-allocation design
-#[derive(Debug)]
 pub struct TokioSpawnedTask<T, I> {
     task_id: I,
     handle: JoinHandle<Result<T, AsyncTaskError>>,
@@ -87,6 +101,37 @@ pub struct TokioSpawnedTask<T, I> {
     cpu_usage: TokioCpuUsage,
     memory_usage: TokioMemoryUsage,
     io_usage: TokioIoUsage,
+    cancellation_callback: Option<Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
+    // ELITE PRODUCTION: Configurable timeout with nanosecond precision
+    // Stored atomically for lock-free access and zero allocation
+    timeout_nanos: AtomicU64,
+}
+
+impl<T, I> std::fmt::Debug for TokioSpawnedTask<T, I>
+where
+    T: std::fmt::Debug,
+    I: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokioSpawnedTask")
+            .field("task_id", &self.task_id)
+            .field("handle", &self.handle)
+            .field("runtime_ref", &self.runtime_ref)
+            .field("created_at", &self.created_at)
+            .field("priority", &self.priority)
+            .field("name", &self.name)
+            .field("context", &self.context)
+            .field("fallback_work", &self.fallback_work)
+            .field("max_retries", &self.max_retries)
+            .field("current_retry", &self.current_retry)
+            .field("retry_strategy", &self.retry_strategy)
+            .field("cpu_usage", &self.cpu_usage)
+            .field("memory_usage", &self.memory_usage)
+            .field("io_usage", &self.io_usage)
+            .field("cancellation_callback", &self.cancellation_callback.is_some())
+            .field("timeout_nanos", &self.timeout_nanos.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 /// Task execution context with relationships and runtime
@@ -266,6 +311,7 @@ where
         runtime_ref: Arc<TokioOrchestraRuntime<T, I>>,
         priority: TaskPriority,
         name: String,
+        timeout: Duration,
     ) -> Self {
         // Create default fallback work that returns an error
         let fallback_work = TokioAsyncWork::new(Arc::new(|| {
@@ -298,6 +344,9 @@ where
             cpu_usage: TokioCpuUsage::new(),
             memory_usage: TokioMemoryUsage::new(),
             io_usage: TokioIoUsage::new(),
+            cancellation_callback: None,
+            // ELITE PRODUCTION: Store timeout with nanosecond precision
+            timeout_nanos: AtomicU64::new(timeout.as_nanos() as u64),
         }
     }
 }
@@ -363,21 +412,25 @@ where
         self.task_count.fetch_add(1, Ordering::Relaxed);
         
         // Create the spawned task wrapper
+        // ELITE PRODUCTION: Pass configured timeout from task or use sensible default
+        let timeout = task.timeout();
         let spawned_task = TokioSpawnedTask::new(
             task_id,
             handle,
             runtime_ref,
             priority,
             format!("spawned_task_{}", task_id.to_string()),
+            timeout,
         );
 
         // Store handle for management
         let tasks = self.active_tasks.clone();
         let task_id_clone = task_id;
+        let handle_clone = handle.clone();
         self.runtime_handle.spawn(async move {
             let mut tasks = tasks.write().await;
-            // Store the spawned task handle for tracking
-            tasks.insert(task_id_clone, tokio::spawn(async {}));
+            // Store the actual handle for tracking
+            tasks.insert(task_id_clone, handle_clone);
         });
 
         spawned_task
@@ -404,12 +457,70 @@ where
         self.is_running.store(false, Ordering::Relaxed);
 
         let tasks = self.active_tasks.clone();
+        let task_count = AtomicUsize::new(self.task_count.load(Ordering::Relaxed));
+        
+        // Create the shutdown work as AsyncWork
+        let shutdown_work = TokioAsyncWork::new(Arc::new(move || {
+            let tasks = tasks.clone();
+            let task_count = task_count.clone();
+            let timeout = timeout.clone();
+            
+            Box::pin(async move {
+                let start = std::time::Instant::now();
+                loop {
+                    // Manual timeout check - ELITE POLLING!
+                    if start.elapsed() > timeout {
+                        let mut tasks = tasks.write().await;
+                        for handle in tasks.values() {
+                            handle.abort();
+                        }
+                        tasks.clear();
+                        task_count.store(0, Ordering::Relaxed);
+                        return (); // Timeout reached
+                    }
+                    
+                    let tasks_guard = tasks.read().await;
+                    if tasks_guard.is_empty() {
+                        drop(tasks_guard);
+                        let mut tasks = tasks.write().await;
+                        tasks.clear();
+                        task_count.store(0, Ordering::Relaxed);
+                        return (); // All tasks done
+                    }
+                    
+                    // Check if all tasks are finished
+                    let all_finished = tasks_guard.values().all(|h| h.is_finished());
+                    if all_finished {
+                        drop(tasks_guard);
+                        let mut tasks = tasks.write().await;
+                        tasks.clear();
+                        task_count.store(0, Ordering::Relaxed);
+                        return (); // All finished
+                    }
+                    drop(tasks_guard);
+                    
+                    // Yield to allow other tasks to run
+                    tokio::task::yield_now().await;
+                }
+            })
+        }));
+        
+        // Create an AsyncTask and run the shutdown work
+        // This uses the existing ELITE POLLING infrastructure
+        let shutdown_task = TokioSpawningTask::<(), I>::new(
+            I::from_string("shutdown_task".to_string())
+        ).run(shutdown_work);
+        
+        // Block on the future using the runtime handle
+        use std::future::Future;
         let result = self.runtime_handle.block_on(async move {
-            // Cannot use tokio directly - must use runtime abstraction
-            panic!("shutdown_with_timeout requires proper runtime abstraction")
+            shutdown_task.await
         });
-
-        result.or(Ok(()))
+        
+        match result.into_result() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(OrchestratorError::OperationFailed(format!("Shutdown failed: {:?}", e)))
+        }
     }
 
     #[inline]
@@ -454,8 +565,19 @@ where
 {
     async fn cancel(
         &self,
-        level: sweet_async_api::task::cancellable_task::CancellationLevel,
+        _level: sweet_async_api::task::cancellable_task::CancellationLevel,
     ) -> Result<(), sweet_async_api::orchestra::OrchestratorError> {
+        // Elite production implementation: Execute cancellation callback if registered
+        if let Some(ref callback) = self.cancellation_callback {
+            // Spawn the callback execution in the background
+            // This ensures it runs even if the task is being cancelled
+            let callback_future = callback();
+            self.runtime_ref.runtime_handle.spawn(async move {
+                callback_future.await;
+            });
+        }
+        
+        // Abort the main task handle
         self.handle.abort();
         Ok(())
     }
@@ -482,12 +604,16 @@ where
         self.handle.is_finished()
     }
 
-    fn on_cancel<F, Fut>(self, _callback: F) -> Self
+    fn on_cancel<F, Fut>(mut self, callback: F) -> Self
     where
         F: sweet_async_api::task::builder::AsyncWork<Fut> + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        // For now, return self unchanged - callback registration not implemented
+        // Elite production implementation: Store the cancellation callback
+        // The callback will be executed when cancel is called
+        self.cancellation_callback = Some(Arc::new(move || {
+            Box::pin(callback.run())
+        }));
         self
     }
 }
@@ -542,7 +668,10 @@ where
 
     #[inline]
     fn timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(300) // Default 5 minute timeout
+        // ELITE PRODUCTION: Return configured timeout from atomic storage
+        // Zero allocation - just an atomic load and conversion
+        let nanos = self.timeout_nanos.load(Ordering::Relaxed);
+        Duration::from_nanos(nanos)
     }
 }
 
